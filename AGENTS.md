@@ -13,9 +13,13 @@ implementation details do not apply.
 
 ## Working in the repository
 
-- Preserve the maintainer's and other agents' changes. Never discard, stash,
-  or overwrite changes you did not make. Work in separate worktrees for
-  parallel tasks and coordinate work that changes a shared public contract.
+- Assume the maintainer and multiple agents are working concurrently, including
+  in the same checkout. Treat changes you did not make as intentional. Never
+  discard, stash, or overwrite them to get a clean working tree.
+- Stage and commit only your own changes. Review the staged diff before
+  committing. If someone else has edited the same file, stage only your hunks
+  and coordinate any overlap you cannot cleanly separate. Use separate worktrees
+  where useful and coordinate changes to shared public contracts.
 - Use `dev` for development once the default release and development branches
   are set up. Promote `main` from a verified release tag. Follow the shared
   standard for site-only exceptions. Commit, push, tag, or promote only when

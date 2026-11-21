@@ -1,14 +1,16 @@
+use crate::ui::tokens::{ACCENT, MUTED, SPACE_1, SPACE_2, TEXT};
+use crate::ui::{Icon, action, field_frame, focus_text_field, note, pending_button};
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::rc::Rc;
 
 use anyhow::Context as _;
 
-use gpui::{AnyElement, ClipboardItem, Context, KeyDownEvent, Window, div, prelude::*, rgb};
+use gpui::{AnyElement, ClipboardItem, Context, KeyDownEvent, Window, div, prelude::*};
 use steelgum::SceneObject;
 
 use super::object_rename::object_label;
-use super::workspace::{ACCENT, BORDER, MUTED, SHELL, TEXT, action, note};
+
 use super::{Project, ReviewWindow, label};
 
 #[derive(Default)]
@@ -27,10 +29,10 @@ impl ReviewWindow {
         let draft = &self.review_draft;
         let edit = self.review_focus.clone();
         div()
-            .mt_2()
+            .mt(SPACE_2)
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(SPACE_2)
             .when(!draft.expanded, |pane| {
                 pane.child(
                     action("flag-object", "Flag for Review", false).on_click(cx.listener(
@@ -44,39 +46,34 @@ impl ReviewWindow {
             })
             .when(draft.expanded, |pane| {
                 pane.child(
-                    div()
-                        .id("review-note")
-                        .track_focus(&edit)
-                        .tab_index(0)
-                        .role(gpui::accesskit::Role::TextInput)
-                        .aria_label("Review note")
-                        .aria_value(draft.note.clone())
-                        .on_click(
-                            cx.listener(|view, _, window, cx| view.review_focus.focus(window, cx)),
-                        )
-                        .border_1()
-                        .border_color(rgb(BORDER))
-                        .focus(|style| style.border_color(rgb(ACCENT)))
-                        .rounded_md()
-                        .px_2()
-                        .py_1()
-                        .bg(rgb(SHELL))
-                        .text_sm()
-                        .text_color(rgb(if draft.note.is_empty() { MUTED } else { TEXT }))
-                        .child(if draft.note.is_empty() {
-                            "Add a note (optional)".to_owned()
-                        } else {
-                            draft.note.clone()
-                        }),
+                    focus_text_field(
+                        field_frame("review-note"),
+                        &edit,
+                        "Review note",
+                        draft.note.clone(),
+                        true,
+                    )
+                    .on_click(
+                        cx.listener(|view, _, window, cx| view.review_focus.focus(window, cx)),
+                    )
+                    .text_color(if draft.note.is_empty() { MUTED } else { TEXT })
+                    .child(if draft.note.is_empty() {
+                        "Add a note (optional)".to_owned()
+                    } else {
+                        draft.note.clone()
+                    }),
                 )
                 .child(
                     action(
                         "include-screenshot",
-                        if draft.include_screenshot {
-                            "✓ Include viewport screenshot"
-                        } else {
-                            "Include viewport screenshot"
-                        },
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(SPACE_1)
+                            .when(draft.include_screenshot, |label| {
+                                label.child(Icon::Check.element(ACCENT))
+                            })
+                            .child("Include viewport screenshot"),
                         draft.include_screenshot,
                     )
                     .aria_toggled(if draft.include_screenshot {
@@ -91,18 +88,12 @@ impl ReviewWindow {
                         cx.notify();
                     })),
                 )
-                .child(
-                    action(
-                        "copy-review-request",
-                        if draft.pending_capture.is_some() {
-                            "Saving screenshot…"
-                        } else {
-                            "Copy review request"
-                        },
-                        false,
-                    )
-                    .on_click(cx.listener(|view, _, _, cx| view.copy_review_request(cx))),
-                )
+                .child(if draft.pending_capture.is_some() {
+                    pending_button("copy-review-request", "Saving screenshot…")
+                } else {
+                    action("copy-review-request", "Copy review request", false)
+                        .on_click(cx.listener(|view, _, _, cx| view.copy_review_request(cx)))
+                })
                 .when(draft.copied, |pane| {
                     pane.child(note(if draft.include_screenshot {
                         "Copied with the saved PNG path."

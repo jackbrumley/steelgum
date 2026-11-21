@@ -1,13 +1,15 @@
+use crate::ui::tokens::{BORDER, SPACE_2, SPACE_3};
+use crate::ui::{action, danger_button, note};
 use std::path::PathBuf;
 
-use gpui::{AnyElement, Context, div, prelude::*, rgb};
+use gpui::{AnyElement, Context, div, prelude::*};
 use steelgum::{
     project::{AuthoredScreen, delete_screen},
     scene_edit::delete_object,
 };
 
 use super::assets::remove_asset;
-use super::workspace::{BORDER, action, control, note};
+
 use super::{ReviewWindow, Tool, object_rename::object_label};
 
 #[derive(Clone, PartialEq, Eq)]
@@ -57,21 +59,15 @@ impl ReviewWindow {
     pub(super) fn deletion_footer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let target = self.delete_target()?;
         let confirming = self.pending_deletion.as_ref() == Some(&target);
-        let danger = |label| {
-            control("delete-definition", label, false)
-                .text_color(rgb(0xffadaf))
-                .bg(rgb(0x3f262c))
-                .border_color(rgb(0x7a4349))
-                .hover(|style| style.bg(rgb(0x583037)))
-        };
+        let danger = || danger_button("delete-definition", "Delete");
         let footer = div()
             .flex_none()
             .flex()
             .flex_col()
-            .gap_2()
-            .p_3()
+            .gap(SPACE_2)
+            .p(SPACE_3)
             .border_t_1()
-            .border_color(rgb(BORDER));
+            .border_color(BORDER);
         Some(
             if confirming {
                 footer
@@ -79,9 +75,9 @@ impl ReviewWindow {
                     .child(
                         div()
                             .flex()
-                            .gap_2()
+                            .gap(SPACE_2)
                             .child(
-                                danger("Delete").on_click(
+                                danger().on_click(
                                     cx.listener(|view, _, _, cx| view.confirm_delete(cx)),
                                 ),
                             )
@@ -93,17 +89,15 @@ impl ReviewWindow {
                             )),
                     )
             } else {
-                footer.child(
-                    danger("Delete").on_click(cx.listener(move |view, _, _, cx| {
-                        if !view.definitions.writing
-                            && !view.pause_menu.saving()
-                            && !view.importing_asset()
-                        {
-                            view.pending_deletion = Some(target.clone());
-                            cx.notify();
-                        }
-                    })),
-                )
+                footer.child(danger().on_click(cx.listener(move |view, _, _, cx| {
+                    if !view.definitions.writing
+                        && !view.pause_menu.saving()
+                        && !view.importing_asset()
+                    {
+                        view.pending_deletion = Some(target.clone());
+                        cx.notify();
+                    }
+                })))
             }
             .into_any_element(),
         )

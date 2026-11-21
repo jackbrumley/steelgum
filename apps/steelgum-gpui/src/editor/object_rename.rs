@@ -1,9 +1,10 @@
+use crate::ui::tokens::{ACCENT, MUTED, SHELL, SPACE_1, SPACE_2, TEXT};
+use crate::ui::{action, field_frame, focus_text_field, note};
 use std::rc::Rc;
 
-use gpui::{AnyElement, ClipboardItem, Context, KeyDownEvent, Window, div, prelude::*, rgb};
+use gpui::{AnyElement, ClipboardItem, Context, KeyDownEvent, Window, div, prelude::*};
 use steelgum::{MAX_DISPLAY_NAME_LENGTH, SceneObject, scene_edit::rename_object};
 
-use super::workspace::{ACCENT, BORDER, MUTED, SHELL, TEXT, action, note};
 use super::{ReviewWindow, Tool, label};
 
 pub(super) struct RenameDraft {
@@ -29,10 +30,10 @@ impl ReviewWindow {
         }
         let control = if let Some(draft) = &self.rename {
             div()
-                .mt_2()
+                .mt(SPACE_2)
                 .flex()
                 .flex_col()
-                .gap_1()
+                .gap(SPACE_1)
                 .child(if draft.saving {
                     note("Saving name…")
                 } else {
@@ -44,7 +45,7 @@ impl ReviewWindow {
                 .into_any_element()
         } else {
             action("rename-object", "Rename (F2)", false)
-                .mt_2()
+                .mt(SPACE_2)
                 .on_click(cx.listener(|view, _, window, cx| {
                     view.begin_rename(window, cx);
                 }))
@@ -66,29 +67,21 @@ impl ReviewWindow {
             format!("{prefix}▏{suffix}")
         };
         Some(
-            div()
-                .id("object-name")
-                .track_focus(&self.rename_focus)
-                .tab_index(0)
-                .role(gpui::accesskit::Role::TextInput)
-                .aria_label("Display name")
-                .aria_value(draft.name.clone())
-                .border_1()
-                .rounded_md()
-                .border_color(rgb(BORDER))
-                .focus(|style| style.border_color(rgb(ACCENT)))
-                .px_2()
-                .py_1()
-                .text_sm()
-                .text_color(rgb(if draft.saving { MUTED } else { TEXT }))
-                .bg(rgb(if draft.select_all { ACCENT } else { SHELL }))
-                .when(draft.select_all, |field| field.text_color(rgb(SHELL)))
-                .on_click(cx.listener(|view, _, window, cx| {
-                    view.rename_focus.focus(window, cx);
-                    cx.stop_propagation();
-                }))
-                .child(value)
-                .into_any_element(),
+            focus_text_field(
+                field_frame("object-name"),
+                &self.rename_focus,
+                "Display name",
+                draft.name.clone(),
+                !draft.saving,
+            )
+            .text_color(if draft.saving { MUTED } else { TEXT })
+            .when(draft.select_all, |field| field.bg(ACCENT).text_color(SHELL))
+            .on_click(cx.listener(|view, _, window, cx| {
+                view.rename_focus.focus(window, cx);
+                cx.stop_propagation();
+            }))
+            .child(value)
+            .into_any_element(),
         )
     }
 

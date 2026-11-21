@@ -1,10 +1,15 @@
-use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, rgb, rgba};
+use crate::ui::tokens::{
+    PREVIEW_BUTTON, PREVIEW_DIMMER, PREVIEW_SURFACE, PREVIEW_TEXT, SPACE_1, SPACE_2, SPACE_3,
+    SPACE_4, SPACE_5, TYPE_TITLE,
+};
+use crate::ui::{action, create_action, note, sidebar_row};
+use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px};
 use steelgum::{
     project::{MANIFEST_FILE, ScreenDefinition, create_screen, resolve_project_path},
     scene_edit::add_box,
 };
 
-use super::workspace::{action, create_action, matches_entry, note, sidebar_action};
+use super::workspace::matches_entry;
 use super::{ReviewWindow, Tool};
 
 const PAUSE_MENU: &str = "pause-menu";
@@ -79,7 +84,7 @@ impl ReviewWindow {
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .gap_1()
+            .gap(SPACE_1)
             .children(
                 self.screen_choices()
                     .filter(|(id, title)| matches_entry(title, id, &query))
@@ -87,8 +92,7 @@ impl ReviewWindow {
                         let id = id.to_owned();
                         let selected = self.tool == Some(Tool::Ui) && id == current;
                         div().id(SharedString::from(format!("screen-{id}"))).child(
-                            sidebar_action("screen", title.to_owned(), selected)
-                                .w_full()
+                            sidebar_row("screen", title.to_owned(), selected)
                                 .overflow_hidden()
                                 .tab_stop(active)
                                 .on_click(cx.listener(move |view, _, _, cx| {
@@ -99,15 +103,15 @@ impl ReviewWindow {
                     }),
             );
         div()
-            .ml_3()
+            .ml(SPACE_3)
             .flex()
             .flex_col()
-            .gap_1()
+            .gap(SPACE_1)
             .when(
                 self.project.source.is_some() && self.project.manifest.is_some(),
                 |nav| {
                     nav.child(
-                        create_action("new-screen", "+ New Screen")
+                        create_action("new-screen", "New Screen")
                             .tab_stop(active)
                             .on_click(cx.listener(|view, _, _, cx| view.new_screen(cx))),
                     )
@@ -126,7 +130,7 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(SPACE_2)
             .when(self.project.source.is_some(), |pane| {
                 pane.child(
                     action("open-screen-definition", "Open Definition", false)
@@ -156,30 +160,35 @@ impl ReviewWindow {
                 .absolute()
                 .inset_0()
                 .block_mouse_except_scroll()
-                .bg(rgba(0x05080aa1))
+                .bg(PREVIEW_DIMMER)
                 .flex()
                 .items_center()
                 .justify_center()
-                .p_3()
+                .p(SPACE_3)
                 .overflow_hidden()
                 .child(
                     div()
                         .w_full()
                         .max_w(px(320.))
-                        .bg(rgb(0x16212a))
-                        .text_color(rgb(0xecf2f6))
+                        .bg(PREVIEW_SURFACE)
+                        .text_color(PREVIEW_TEXT)
                         .flex()
                         .flex_col()
                         .items_center()
-                        .gap_4()
-                        .p_5()
-                        .child(div().text_xl().text_center().child(screen.title.clone()))
+                        .gap(SPACE_4)
+                        .p(SPACE_5)
+                        .child(
+                            div()
+                                .text_size(TYPE_TITLE)
+                                .text_center()
+                                .child(screen.title.clone()),
+                        )
                         .child(
                             div()
                                 .w_full()
                                 .text_center()
-                                .bg(rgb(0x2a3b46))
-                                .py_2()
+                                .bg(PREVIEW_BUTTON)
+                                .py(SPACE_2)
                                 .child(screen.button_label.clone()),
                         ),
                 )
@@ -223,7 +232,7 @@ impl ReviewWindow {
 
     pub(super) fn add_box_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         (self.project.source.is_some() && !self.before).then(|| {
-            create_action("add-box", "+ Add Box")
+            create_action("add-box", "Add Box")
                 .tab_stop(self.menu_open)
                 .on_click(cx.listener(|view, _, _, cx| view.add_scene_box(cx)))
                 .into_any_element()

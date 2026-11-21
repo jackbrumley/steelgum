@@ -1,10 +1,11 @@
+use crate::ui::tokens::{
+    BORDER, ERROR, MUTED, RADIUS_SMALL, SPACE_1, SPACE_2, SPACE_3, TYPE_CAPTION, TYPE_CONTROL,
+};
+use crate::ui::{action, note, sidebar_action, sidebar_row};
 use gpui::{AnyElement, ClickEvent, Context, Window, div, prelude::*, px, rgb};
 use steelgum::review::ObjectChanges;
 
-use super::{
-    ACCENT, BORDER, ERROR, Job, MUTED, ReviewWindow, RunState, SELECTED, Tool, action,
-    matches_entry, note, sidebar_action,
-};
+use super::{Job, ReviewWindow, RunState, Tool, matches_entry};
 use crate::editor::{label, object_rename::object_label};
 
 const BUILD_PROFILES: [(&str, bool, &str); 2] = [
@@ -23,7 +24,7 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(SPACE_2)
             .child(note(if self.project.source.is_some() {
                 "HEAD → Working tree"
             } else {
@@ -49,18 +50,18 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(SPACE_2)
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap_2()
-                    .mt_2()
-                    .pt_3()
+                    .gap(SPACE_2)
+                    .mt(SPACE_2)
+                    .pt(SPACE_3)
                     .border_t_1()
-                    .border_color(rgb(BORDER))
+                    .border_color(BORDER)
                     .child(self.revision_details())
-                    .child(div().flex().gap_2().children(
+                    .child(div().flex().gap(SPACE_2).children(
                         [("Before", true), ("After", false)].map(|(title, before)| {
                             action(title, title, before == self.before)
                                 .flex_1()
@@ -107,8 +108,8 @@ impl ReviewWindow {
             return div()
                 .flex()
                 .items_center()
-                .gap_2()
-                .text_xs()
+                .gap(SPACE_2)
+                .text_size(TYPE_CAPTION)
                 .child(swatch(before.color))
                 .child("→")
                 .child(swatch(after.color))
@@ -151,9 +152,13 @@ impl ReviewWindow {
             .overflow_y_scroll()
             .flex()
             .flex_col()
-            .gap_1()
+            .gap(SPACE_1)
             .when(scene.objects().is_empty(), |pane| {
-                pane.child(div().px_2().child(note("No objects in this revision.")))
+                pane.child(
+                    div()
+                        .px(SPACE_2)
+                        .child(note("No objects in this revision.")),
+                )
             })
             .children(
                 self.visible_objects()
@@ -162,8 +167,8 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .ml_3()
-            .gap_1()
+            .ml(SPACE_3)
+            .gap(SPACE_1)
             .when_some(self.add_box_button(cx), |pane, button| pane.child(button))
             .child(list)
             .into_any_element()
@@ -177,38 +182,43 @@ impl ReviewWindow {
         div()
             .flex_none()
             .border_t_1()
-            .border_color(rgb(BORDER))
-            .px_3()
-            .py_2()
+            .border_color(BORDER)
+            .px(SPACE_3)
+            .py(SPACE_2)
             .when_some(selection, |pane, object| {
                 let [x, y, z] = object.size;
-                pane.child(div().truncate().text_sm().child(object_label(object)))
-                    .child(note(format!("{x} × {y} × {z}")))
-                    .when_some(self.rename_field(&object.id, cx), |pane, input| {
-                        pane.child(input)
-                    })
-                    .when_some(self.rename_control(cx), |pane, control| pane.child(control))
-                    .when_some(self.open_scene_button(cx), |pane, button| {
-                        pane.child(div().mt_2().child(button))
-                    })
-                    .when(
-                        self.project
-                            .review
-                            .changes()
-                            .iter()
-                            .any(|change| change.id == object.id),
-                        |pane| {
-                            pane.child(
-                                action("compare-selection", "Compare Changes", false)
-                                    .mt_2()
-                                    .on_click(cx.listener(|view, _, _, cx| {
-                                        view.show_tool(Tool::Changes);
-                                        cx.notify();
-                                    })),
-                            )
-                        },
-                    )
-                    .child(self.review_request_control(cx))
+                pane.child(
+                    div()
+                        .truncate()
+                        .text_size(TYPE_CONTROL)
+                        .child(object_label(object)),
+                )
+                .child(note(format!("{x} × {y} × {z}")))
+                .when_some(self.rename_field(&object.id, cx), |pane, input| {
+                    pane.child(input)
+                })
+                .when_some(self.rename_control(cx), |pane, control| pane.child(control))
+                .when_some(self.open_scene_button(cx), |pane, button| {
+                    pane.child(div().mt(SPACE_2).child(button))
+                })
+                .when(
+                    self.project
+                        .review
+                        .changes()
+                        .iter()
+                        .any(|change| change.id == object.id),
+                    |pane| {
+                        pane.child(
+                            action("compare-selection", "Compare Changes", false)
+                                .mt(SPACE_2)
+                                .on_click(cx.listener(|view, _, _, cx| {
+                                    view.show_tool(Tool::Changes);
+                                    cx.notify();
+                                })),
+                        )
+                    },
+                )
+                .child(self.review_request_control(cx))
             })
             .when(selection.is_none(), |pane| {
                 let other = if self.before {
@@ -222,17 +232,22 @@ impl ReviewWindow {
                     } else {
                         ("Removed · only in Before", "Show Before")
                     };
-                    pane.child(div().truncate().text_sm().child(object_label(object)))
-                        .child(note(status))
-                        .child(
-                            action("show-object-revision", button, false)
-                                .mt_2()
-                                .on_click(cx.listener(|view, _, _, cx| {
-                                    view.before = !view.before;
-                                    view.reveal_selected_object();
-                                    cx.notify();
-                                })),
-                        )
+                    pane.child(
+                        div()
+                            .truncate()
+                            .text_size(TYPE_CONTROL)
+                            .child(object_label(object)),
+                    )
+                    .child(note(status))
+                    .child(
+                        action("show-object-revision", button, false)
+                            .mt(SPACE_2)
+                            .on_click(cx.listener(|view, _, _, cx| {
+                                view.before = !view.before;
+                                view.reveal_selected_object();
+                                cx.notify();
+                            })),
+                    )
                 } else {
                     pane.child(note("Select an object to see its dimensions."))
                 }
@@ -285,74 +300,64 @@ impl ReviewWindow {
             Tool::Changes
         };
         let active = self.tool == Some(tool) && self.selected.as_deref() == Some(&id);
-        div()
-            .id(gpui::SharedString::from(format!("object-{id}")))
-            .tab_index(0)
-            .tab_stop(self.menu_open)
-            .role(gpui::accesskit::Role::Button)
-            .aria_toggled(if active {
-                gpui::accesskit::Toggled::True
-            } else {
-                gpui::accesskit::Toggled::False
-            })
-            .focus_visible(|style| style.underline())
-            .cursor_pointer()
-            .rounded_md()
-            .px_2()
-            .py_1()
-            .flex()
-            .flex_col()
-            .when(active, |row| row.bg(rgb(SELECTED)).text_color(rgb(ACCENT)))
-            .hover(|style| style.text_color(rgb(ACCENT)))
-            .child(div().truncate().text_sm().child(title))
-            .when_some(detail, |row, detail| row.child(note(detail)))
-            .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
-                view.show_tool(tool);
-                view.select_object(id.clone(), cx);
-                if editable {
-                    view.objects_focus.focus(window, cx);
-                }
-            }))
-            .into_any_element()
+        sidebar_row(
+            gpui::SharedString::from(format!("object-{id}")),
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(div().truncate().text_size(TYPE_CONTROL).child(title))
+                .when_some(detail, |row, detail| row.child(note(detail))),
+            active,
+        )
+        .tab_stop(self.menu_open)
+        .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+            view.show_tool(tool);
+            view.select_object(id.clone(), cx);
+            if editable {
+                view.objects_focus.focus(window, cx);
+            }
+        }))
+        .into_any_element()
     }
 
     pub(super) fn build(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut pane = div().flex().flex_col().gap_3();
+        let mut pane = div().flex().flex_col().gap(SPACE_3);
         if self.project.can_build() {
-            pane =
-                pane.child(note("Target · This computer"))
-                    .child(div().flex().gap_2().children(
-                        BUILD_PROFILES.into_iter().enumerate().map(
-                            |(index, (title, release, hint))| {
-                                sidebar_action(title, title, self.release == release)
-                                    .track_focus(&self.build_profile_focus[index])
-                                    .tab_stop(self.expanded_tool == Some(Tool::Build))
-                                    .aria_description(hint)
-                                    .flex_1()
-                                    .on_hover(cx.listener(move |view, hovered, _, cx| {
-                                        if view.expanded_tool != Some(Tool::Build) {
-                                            return;
-                                        }
-                                        if *hovered {
-                                            view.hovered_build_profile = Some(index);
-                                        } else if view.hovered_build_profile == Some(index) {
-                                            view.hovered_build_profile = None;
-                                        }
+            pane = pane
+                .child(note("Target · This computer"))
+                .child(div().flex().gap(SPACE_2).children(
+                    BUILD_PROFILES.into_iter().enumerate().map(
+                        |(index, (title, release, hint))| {
+                            sidebar_action(title, title, self.release == release)
+                                .track_focus(&self.build_profile_focus[index])
+                                .tab_stop(self.expanded_tool == Some(Tool::Build))
+                                .aria_description(hint)
+                                .flex_1()
+                                .on_hover(cx.listener(move |view, hovered, _, cx| {
+                                    if view.expanded_tool != Some(Tool::Build) {
+                                        return;
+                                    }
+                                    if *hovered {
+                                        view.hovered_build_profile = Some(index);
+                                    } else if view.hovered_build_profile == Some(index) {
+                                        view.hovered_build_profile = None;
+                                    }
+                                    cx.notify();
+                                }))
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    if !view.run_state.busy() {
+                                        view.release = release;
                                         cx.notify();
-                                    }))
-                                    .on_click(cx.listener(move |view, _, _, cx| {
-                                        if !view.run_state.busy() {
-                                            view.release = release;
-                                            cx.notify();
-                                        }
-                                    }))
-                            },
-                        ),
-                    ))
-                    .child(
-                        sidebar_action("run-build", "Build", false)
-                            .on_click(cx.listener(|view, _, _, cx| view.run_game(Job::Build, cx))),
-                    );
+                                    }
+                                }))
+                        },
+                    ),
+                ))
+                .child(
+                    sidebar_action("run-build", "Build", false)
+                        .on_click(cx.listener(|view, _, _, cx| view.run_game(Job::Build, cx))),
+                );
         } else if !self.project.can_run() {
             pane = pane.child(note(
                 "Declare a Cargo runner in steelgum.json to build and play this project.",
@@ -377,14 +382,12 @@ impl ReviewWindow {
         pane.when_some(self.run_state.message(), |pane, status| {
             pane.child(
                 div()
-                    .text_sm()
-                    .text_color(rgb(
-                        if matches!(self.run_state, RunState::Finished(Err(_))) {
-                            ERROR
-                        } else {
-                            MUTED
-                        },
-                    ))
+                    .text_size(TYPE_CONTROL)
+                    .text_color(if matches!(self.run_state, RunState::Finished(Err(_))) {
+                        ERROR
+                    } else {
+                        MUTED
+                    })
                     .child(status.to_owned()),
             )
         })
@@ -435,7 +438,7 @@ fn swatch([r, g, b]: [u8; 3]) -> impl IntoElement {
     div()
         .flex()
         .items_center()
-        .gap_1()
-        .child(div().size(px(10.)).rounded_sm().bg(rgb(color)))
+        .gap(SPACE_1)
+        .child(div().size(px(10.)).rounded(RADIUS_SMALL).bg(rgb(color)))
         .child(format!("#{color:06X}"))
 }

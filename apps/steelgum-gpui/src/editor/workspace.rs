@@ -1,7 +1,13 @@
 use super::{Job, ReviewWindow, RunState};
+use crate::ui::tokens::{
+    BORDER, ERROR, MUTED, ON_ACCENT, PANE_SPRING, PANEL, RADIUS_CONTROL, SHELL, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, TEXT, TOOLBAR, TOOLBAR_HEIGHT, TYPE_CAPTION, TYPE_CONTROL, TYPE_HEADING,
+    WEIGHT_HEADING,
+};
+use crate::ui::{Icon, action, icon_button, note, primary_button};
 use gpui::{
     AnimationExt as _, AnyElement, Context, Div, KeyDownEvent, Render, SpringAnimation,
-    SpringConfig, Stateful, Window, div, prelude::*, px, rgb,
+    SpringConfig, Window, div, prelude::*, px,
 };
 
 mod navigation;
@@ -10,15 +16,6 @@ mod tool;
 
 pub(super) use tool::Tool;
 
-pub(super) const SHELL: u32 = 0x15181f;
-const TOOLBAR: u32 = 0x20242e;
-const PANEL: u32 = 0x1b1f28;
-pub(super) const BORDER: u32 = 0x343b4a;
-pub(super) const TEXT: u32 = 0xeef1f7;
-pub(super) const MUTED: u32 = 0xaab4c6;
-pub(super) const ACCENT: u32 = 0xbab5ff;
-pub(super) const SELECTED: u32 = 0x353451;
-const ERROR: u32 = 0xffb5b4;
 const PANE_WIDTH: f32 = 258.;
 
 impl ReviewWindow {
@@ -133,6 +130,7 @@ impl ReviewWindow {
                         self.workspace_focus.focus(window, cx);
                     }
                 }
+                "tab" => return,
                 "backspace" => {
                     self.search.pop();
                 }
@@ -160,33 +158,38 @@ impl ReviewWindow {
     fn toolbar(&self, cx: &mut Context<Self>) -> Div {
         let playing = matches!(self.run_state, RunState::Running(Job::Play));
         bar()
-            .h(px(56.))
+            .h(TOOLBAR_HEIGHT)
             .child(
-                action("menu", "☰", self.menu_open)
-                    .aria_label("Toggle tool menu")
-                    .aria_expanded(self.menu_open)
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.menu_open = !view.menu_open;
-                        if !view.menu_open && view.search_focus.is_focused(window) {
-                            view.workspace_focus.focus(window, cx);
-                        }
-                        cx.notify();
-                    })),
+                icon_button(
+                    "menu",
+                    Icon::Menu,
+                    "Toggle tool menu",
+                    self.menu_open,
+                    false,
+                )
+                .aria_expanded(self.menu_open)
+                .on_click(cx.listener(|view, _, window, cx| {
+                    view.menu_open = !view.menu_open;
+                    if !view.menu_open && view.search_focus.is_focused(window) {
+                        view.workspace_focus.focus(window, cx);
+                    }
+                    cx.notify();
+                })),
             )
             .child(
                 div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_lg()
+                    .font_weight(WEIGHT_HEADING)
+                    .text_size(TYPE_HEADING)
                     .child("Steelgum"),
             )
-            .child(div().ml_2().h(px(18.)).w(px(1.)).bg(rgb(BORDER)))
+            .child(div().ml(SPACE_2).h(px(18.)).w(px(1.)).bg(BORDER))
             .child(
                 div()
                     .min_w_0()
                     .flex_1()
                     .truncate()
-                    .text_sm()
-                    .text_color(rgb(MUTED))
+                    .text_size(TYPE_CONTROL)
+                    .text_color(MUTED)
                     .child(self.project.name.clone()),
             )
             .when(self.project.source.is_some(), |row| {
@@ -216,17 +219,21 @@ impl ReviewWindow {
                 })),
             )
             .child(
-                control("play", if playing { "■  Stop" } else { "▶  Play" }, playing)
-                    .bg(rgb(ACCENT))
-                    .text_color(rgb(0x24203c))
-                    .hover(|style| style.bg(rgb(0xd3ceff)))
-                    .on_click(cx.listener(move |view, _, _, cx| {
-                        if playing {
-                            view.cancel_job(cx);
-                        } else {
-                            view.run_game(Job::Play, cx);
-                        }
-                    })),
+                primary_button(
+                    "play",
+                    if playing {
+                        Icon::Stop.label("Stop", ON_ACCENT)
+                    } else {
+                        Icon::Play.label("Play", ON_ACCENT)
+                    },
+                )
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if playing {
+                        view.cancel_job(cx);
+                    } else {
+                        view.run_game(Job::Play, cx);
+                    }
+                })),
             )
     }
 
@@ -236,9 +243,9 @@ impl ReviewWindow {
             .w(px(PANE_WIDTH))
             .h_full()
             .flex_none()
-            .bg(rgb(PANEL))
+            .bg(PANEL)
             .border_l_1()
-            .border_color(rgb(BORDER))
+            .border_color(BORDER)
             .flex()
             .flex_col()
             .when_some(tool, |pane, tool| {
@@ -248,31 +255,35 @@ impl ReviewWindow {
                         .min_h_0()
                         .flex_1()
                         .overflow_y_scroll()
-                        .p_3()
+                        .p(SPACE_3)
                         .child(content)
                         .into_any_element()
                 };
                 pane.child(
                     bar()
+                        .child(div().flex_1().font_weight(WEIGHT_HEADING).child(
+                            if tool == Tool::Ui {
+                                self.screen_title().to_owned()
+                            } else {
+                                tool.label().to_owned()
+                            },
+                        ))
                         .child(
-                            div()
-                                .flex_1()
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(if tool == Tool::Ui {
-                                    self.screen_title().to_owned()
-                                } else {
-                                    tool.label().to_owned()
-                                }),
-                        )
-                        .child(
-                            action("close-pane", "×", false)
-                                .aria_label("Close tool pane")
-                                .tab_stop(self.tool.is_some())
-                                .on_click(cx.listener(|view, _, window, cx| {
+                            icon_button(
+                                "close-pane",
+                                Icon::Close,
+                                "Close properties",
+                                false,
+                                false,
+                            )
+                            .tab_stop(self.tool.is_some())
+                            .on_click(cx.listener(
+                                |view, _, window, cx| {
                                     view.close_properties();
                                     view.workspace_focus.focus(window, cx);
                                     cx.notify();
-                                })),
+                                },
+                            )),
                         ),
                 )
                 .child(match tool {
@@ -332,7 +343,7 @@ impl ReviewWindow {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .font_weight(WEIGHT_HEADING)
                             .child(title),
                     )
                     .child(note(if self.before { "Before" } else { "After" }).flex_none())
@@ -349,8 +360,8 @@ impl ReviewWindow {
                             .w(px(63.))
                             .flex_none()
                             .text_right()
-                            .text_xs()
-                            .text_color(rgb(MUTED))
+                            .text_size(TYPE_CAPTION)
+                            .text_color(MUTED)
                             .child(if self.viewport_fps == 0 {
                                 "FPS idle".to_owned()
                             } else {
@@ -374,14 +385,14 @@ impl ReviewWindow {
                                 .top_3()
                                 .left_3()
                                 .right_3()
-                                .rounded_md()
+                                .rounded(RADIUS_CONTROL)
                                 .border_1()
-                                .border_color(rgb(BORDER))
-                                .bg(rgb(SHELL))
-                                .p_2()
-                                .text_sm()
-                                .text_color(rgb(ERROR))
-                                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Showing the last valid project"))
+                                .border_color(BORDER)
+                                .bg(SHELL)
+                                .p(SPACE_2)
+                                .text_size(TYPE_CONTROL)
+                                .text_color(ERROR)
+                                .child(div().font_weight(WEIGHT_HEADING).child("Showing the last valid project"))
                                 .child(issue.to_owned()),
                         )
                     }),
@@ -395,8 +406,8 @@ impl ReviewWindow {
                             .flex_1()
                             .min_w_0()
                             .truncate()
-                            .text_sm()
-                            .text_color(rgb(MUTED))
+                            .text_size(TYPE_CONTROL)
+                            .text_color(MUTED)
                             .child(self.build_profile_hint(window).unwrap_or(if previewing_screen {
                                 "UI preview"
                             } else if self.top_down {
@@ -433,8 +444,8 @@ impl Render for ReviewWindow {
             .tab_group()
             .on_key_down(cx.listener(Self::handle_key))
             .size_full()
-            .bg(rgb(SHELL))
-            .text_color(rgb(TEXT))
+            .bg(SHELL)
+            .text_color(TEXT)
             .flex()
             .flex_col()
             .child(self.toolbar(cx))
@@ -467,17 +478,13 @@ impl Render for ReviewWindow {
     }
 }
 
-pub(super) fn note(text: impl Into<gpui::SharedString>) -> Div {
-    div().text_xs().text_color(rgb(MUTED)).child(text.into())
-}
-
 fn status_line(text: &str, error: bool) -> Div {
     div()
-        .px_4()
-        .py_1()
-        .text_sm()
+        .px(SPACE_4)
+        .py(SPACE_1)
+        .text_size(TYPE_CONTROL)
         .truncate()
-        .text_color(rgb(if error { ERROR } else { MUTED }))
+        .text_color(if error { ERROR } else { MUTED })
         .child(text.lines().next().unwrap_or(text).to_owned())
 }
 
@@ -486,63 +493,16 @@ fn bar() -> Div {
         .flex()
         .flex_none()
         .items_center()
-        .gap_2()
-        .px_3()
-        .py_2()
-        .bg(rgb(TOOLBAR))
+        .gap(SPACE_2)
+        .px(SPACE_3)
+        .py(SPACE_2)
+        .bg(TOOLBAR)
         .border_b_1()
-        .border_color(rgb(BORDER))
-}
-
-pub(super) fn action(id: &'static str, content: impl IntoElement, active: bool) -> Stateful<Div> {
-    control(id, content, active).hover(|style| style.bg(rgb(SELECTED)))
-}
-
-pub(super) fn sidebar_action(
-    id: &'static str,
-    label: impl IntoElement,
-    selected: bool,
-) -> Stateful<Div> {
-    control(id, label, selected)
-        .border_0()
-        .justify_start()
-        .bg(if selected {
-            rgb(SELECTED)
-        } else {
-            gpui::rgba(0)
-        })
-        .hover(|style| style.text_color(rgb(ACCENT)))
-        .focus_visible(|style| style.underline())
-}
-
-pub(super) fn create_action(id: &'static str, label: &'static str) -> Stateful<Div> {
-    sidebar_action(id, label, false).text_color(rgb(ACCENT))
+        .border_color(BORDER)
 }
 
 pub(super) fn matches_entry(name: &str, id: &str, query: &str) -> bool {
     name.to_lowercase().contains(query) || id.to_lowercase().contains(query)
-}
-
-pub(super) fn control(id: &'static str, content: impl IntoElement, active: bool) -> Stateful<Div> {
-    div()
-        .id(id)
-        .tab_index(0)
-        .role(gpui::accesskit::Role::Button)
-        .focus_visible(|style| style.border_color(rgb(ACCENT)))
-        .flex()
-        .items_center()
-        .justify_center()
-        .flex_none()
-        .px_2()
-        .py_1()
-        .rounded_md()
-        .text_sm()
-        .cursor_pointer()
-        .bg(rgb(if active { SELECTED } else { TOOLBAR }))
-        .text_color(rgb(if active { ACCENT } else { TEXT }))
-        .border_1()
-        .border_color(rgb(BORDER))
-        .child(content)
 }
 
 fn slide(id: &'static str, width: f32, open: bool, content: Div) -> AnyElement {
@@ -553,9 +513,13 @@ fn slide(id: &'static str, width: f32, open: bool, content: Div) -> AnyElement {
         .child(content)
         .with_spring(
             id,
-            SpringAnimation::new(SpringConfig::new(360., 38., 1.))
-                .to(px(if open { width } else { 0. }))
-                .with_epsilon(0.5),
+            SpringAnimation::new(SpringConfig::new(
+                PANE_SPRING.0,
+                PANE_SPRING.1,
+                PANE_SPRING.2,
+            ))
+            .to(px(if open { width } else { 0. }))
+            .with_epsilon(0.5),
             move |pane, progress| pane.w(px(progress.0.clamp(0., width))),
         )
         .into_any_element()

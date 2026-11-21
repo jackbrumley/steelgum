@@ -137,3 +137,28 @@ The live agent interface queries the open workspace through a per-user local
 request directory. A stdio MCP adapter exposes the same status, object list,
 and capture commands as the live CLI. Object captures temporarily render a
 framed view, queue the PNG readback, and restore the current viewport.
+
+## Desktop UI
+
+The native editor keeps colour, spacing, typography, radii, and control sizes
+in `apps/steelgum-gpui/src/ui/tokens.rs`. The shared controls own their
+appearance and receive the feature's state and actions. Toolbar and sidebar
+icons use the same Tabler SVG renderer and logical size. The search clear
+control uses a separate hit target and returns focus to the search field.
+
+Use the offscreen UI kit test to review button variants, selection,
+properties, and search together. Hygiene checks for inline colours and
+direct SVG rendering in editor UI. Game scene colours and renderer materials
+remain in game data and rendering code.
+
+## Game FPS overlay
+
+Bevy runners can add the optional `steelgum-bevy` crate and register
+`steelgum_bevy::FpsOverlayPlugin` after Bevy's default plugins. Groundsector
+enables it in its game window. It reports the game's frame rate from Bevy's
+frame-time diagnostics, independently of the editor viewport. The overlay
+targets the primary window and reserves render layer 31 and camera order 100.
+
+```rust
+app.add_plugins(steelgum_bevy::FpsOverlayPlugin);
+```

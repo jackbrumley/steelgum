@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -52,8 +53,31 @@ def boundary_violations():
                 yield f"{package['name']} brings {name} into the headless workspace."
 
 
+def desktop_ui_violations():
+    desktop = ROOT / "apps/steelgum-gpui/src"
+    paths = [
+        *desktop.joinpath("editor").rglob("*.rs"),
+        *desktop.joinpath("ui").rglob("*.rs"),
+        desktop / "viewport.rs",
+        desktop / "viewport/bevy.rs",
+    ]
+    for path in paths:
+        if path == desktop / "ui/tokens.rs":
+            continue
+        source = path.read_text(encoding="utf-8")
+        checks = [
+            (r"\brgba?\(\s*(?:0x[\da-fA-F]+|\d+)\s*\)", "Use an editor colour token"),
+        ]
+        if path != desktop / "ui/icon.rs":
+            checks.append((r"\bsvg\s*\(", "Render editor icons through ui::Icon"))
+        for pattern, help_text in checks:
+            for match in re.finditer(pattern, source):
+                line = source.count("\n", 0, match.start()) + 1
+                yield f"{path.relative_to(ROOT)}:{line}: {help_text}."
+
+
 def main():
-    failures = list(boundary_violations())
+    failures = [*boundary_violations(), *desktop_ui_violations()]
     for path, count in source_sizes():
         if count > HARD_LIMIT:
             failures.append(f"{path} has {count} lines (hard limit {HARD_LIMIT}).")

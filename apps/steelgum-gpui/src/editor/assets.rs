@@ -1,3 +1,5 @@
+use crate::ui::tokens::{RADIUS_CONTROL, SHELL, SPACE_1, SPACE_2, SPACE_3, TYPE_CONTROL};
+use crate::ui::{create_action, note, sidebar_action, sidebar_row};
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -5,15 +7,13 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result, ensure};
 use gpui::{
-    AnyElement, Context, Image, ImageFormat, ObjectFit, SharedString, div, img, prelude::*, px, rgb,
+    AnyElement, Context, Image, ImageFormat, ObjectFit, SharedString, div, img, prelude::*, px,
 };
 use image::{ImageReader, Limits};
 
 use steelgum::project::{ProjectManifest, resolve_project_path};
 
-use super::workspace::{
-    ACCENT, SELECTED, SHELL, create_action, matches_entry, note, sidebar_action,
-};
+use super::workspace::matches_entry;
 use super::{Project, ReviewWindow, Tool};
 
 #[derive(Default)]
@@ -171,11 +171,11 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .ml_3()
+            .gap(SPACE_2)
+            .ml(SPACE_3)
             .when(self.project.source.is_some(), |pane| {
                 pane.child(
-                    create_action("import-asset", "+ Import Asset")
+                    create_action("import-asset", "Import Asset")
                         .tab_stop(self.menu_open)
                         .on_click(cx.listener(|view, _, _, cx| view.import_asset(cx))),
                 )
@@ -195,7 +195,7 @@ impl ReviewWindow {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(SPACE_1)
                     .when(assets.scanning, |pane| pane.child(note("Loading assets…")))
                     .when_some(assets.error.as_ref(), |pane, error| {
                         pane.child(note(error.clone()))
@@ -223,32 +223,21 @@ impl ReviewWindow {
                                     let active = self.tool == Some(Tool::Assets)
                                         && assets.selected.as_ref() == Some(path);
                                     let path = path.clone();
-                                    div()
-                                        .id(id)
-                                        .tab_index(0)
-                                        .tab_stop(self.menu_open)
-                                        .role(gpui::accesskit::Role::Button)
-                                        .aria_toggled(if active {
-                                            gpui::accesskit::Toggled::True
-                                        } else {
-                                            gpui::accesskit::Toggled::False
-                                        })
-                                        .when(active, |row| {
-                                            row.bg(rgb(SELECTED)).text_color(rgb(ACCENT))
-                                        })
-                                        .hover(|style| style.text_color(rgb(ACCENT)))
-                                        .focus_visible(|style| style.underline())
-                                        .rounded_md()
-                                        .py_1()
-                                        .px_2()
-                                        .text_sm()
-                                        .truncate()
-                                        .cursor_pointer()
-                                        .child(path.display().to_string())
-                                        .on_click(cx.listener(move |view, _, _, cx| {
+                                    sidebar_row(
+                                        id,
+                                        div()
+                                            .min_w_0()
+                                            .truncate()
+                                            .child(path.display().to_string()),
+                                        active,
+                                    )
+                                    .tab_stop(self.menu_open)
+                                    .on_click(cx.listener(
+                                        move |view, _, _, cx| {
                                             view.show_tool(Tool::Assets);
                                             view.preview_asset(path.clone(), cx);
-                                        }))
+                                        },
+                                    ))
                                 }),
                         )
                     }),
@@ -263,8 +252,12 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(div().text_sm().child(path.display().to_string()))
+            .gap(SPACE_2)
+            .child(
+                div()
+                    .text_size(TYPE_CONTROL)
+                    .child(path.display().to_string()),
+            )
             .child(self.assets.preview_panel())
             .into_any_element()
     }
@@ -356,9 +349,9 @@ impl AssetBrowser {
             })) => div()
                 .flex()
                 .flex_col()
-                .gap_1()
+                .gap(SPACE_1)
                 .child(
-                    div().bg(rgb(SHELL)).rounded_md().child(
+                    div().bg(SHELL).rounded(RADIUS_CONTROL).child(
                         img(thumbnail.clone())
                             .w_full()
                             .h(px(132.))

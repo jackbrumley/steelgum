@@ -1,5 +1,6 @@
 mod editor;
 mod live_bridge;
+mod ui;
 mod updates;
 mod viewport;
 #[cfg(windows)]

@@ -6,7 +6,7 @@ members = [
     "examples/door-game",
     "tools/steelgum-dev",
 ]
-exclude = ["apps/door-game-bevy"]
+exclude = ["apps/door-game-bevy", "crates/steelgum-bevy"]
 
 [workspace.package]
 edition = "2024"

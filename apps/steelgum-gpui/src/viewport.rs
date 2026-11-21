@@ -1,12 +1,15 @@
 //! GPUI presentation boundary. The scene model never sees a GPU handle.
 
+#[cfg(not(any(target_os = "linux", windows)))]
+use crate::ui::tokens::{SPACE_2, VIEWPORT_UNAVAILABLE, VIEWPORT_UNAVAILABLE_TEXT};
+
 use std::rc::Rc;
 
 use gpui::AnyElement;
 
 pub(crate) type PendingScreenshot = Box<dyn FnOnce() -> anyhow::Result<Vec<u8>> + Send>;
 #[cfg(not(any(target_os = "linux", windows)))]
-use gpui::{IntoElement as _, div, prelude::*, rgb};
+use gpui::{IntoElement as _, div, prelude::*};
 use steelgum::{Scene, review::SceneReview};
 
 #[cfg(any(target_os = "linux", windows))]
@@ -112,9 +115,9 @@ impl Viewport {
                 .flex_col()
                 .items_center()
                 .justify_center()
-                .gap_2()
-                .bg(rgb(0x101820))
-                .text_color(rgb(0xadc1cd))
+                .gap(SPACE_2)
+                .bg(VIEWPORT_UNAVAILABLE)
+                .text_color(VIEWPORT_UNAVAILABLE_TEXT)
                 .child("Live Bevy viewport is currently available on Linux and Windows.")
                 .child(format!(
                     "{projection} · {scope} · {object_count} objects · Selection: {selection}"

@@ -1,4 +1,5 @@
 //! A same-device Bevy render target sampled directly by the GPUI canvas.
+use crate::ui::tokens::{ERROR, SPACE_4, VIEWPORT_SURFACE};
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -24,7 +25,7 @@ use bevy::render::view::DebandDither;
 use bevy::render::{Render, RenderApp, RenderPlugin, RenderSystems};
 use bevy::window::ExitCondition;
 use gpui::prelude::*;
-use gpui::{AnyElement, Corners, GpuCanvasContext, div, gpu_canvas, rgb};
+use gpui::{AnyElement, Corners, GpuCanvasContext, div, gpu_canvas};
 use gpui_interop::{
     SurfaceButton, SurfaceEvent, SurfaceInput, SurfacePoint, SurfaceScroll, surface_input,
 };
@@ -552,14 +553,14 @@ impl Surface {
         if let Some(message) = self.error.borrow().clone() {
             return div()
                 .size_full()
-                .p_4()
-                .text_color(rgb(0xffa6a6))
+                .p(SPACE_4)
+                .text_color(ERROR)
                 .child(message)
                 .into_any_element();
         }
         div()
             .size_full()
-            .bg(rgb(0x0e161e))
+            .bg(VIEWPORT_SURFACE)
             .child(interactive)
             .into_any_element()
     }

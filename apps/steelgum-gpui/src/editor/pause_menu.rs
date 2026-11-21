@@ -1,9 +1,11 @@
-use gpui::{
-    AnyElement, Context, FocusHandle, KeyDownEvent, Window, div, prelude::*, px, rgb, rgba,
+use crate::ui::tokens::{
+    ACCENT, PREVIEW_BUTTON, PREVIEW_DIMMER, PREVIEW_SURFACE, PREVIEW_TEXT, SHELL, SPACE_1, SPACE_2,
+    SPACE_3, SPACE_4, SPACE_5, TYPE_CONTROL, TYPE_TITLE, WEIGHT_HEADING,
 };
+use crate::ui::{action, field_frame, focus_text_field, note};
+use gpui::{AnyElement, Context, FocusHandle, KeyDownEvent, Window, div, prelude::*, px};
 use steelgum::{pause_menu::PauseMenuConfig, project::save_pause_menu};
 
-use super::workspace::{ACCENT, BORDER, SHELL, action, note};
 use super::{ReviewWindow, Tool};
 
 const FIELDS: [(&str, bool); 7] = [
@@ -114,28 +116,14 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("Settings"),
-            )
+            .gap(SPACE_2)
+            .child(div().font_weight(WEIGHT_HEADING).child("Settings"))
             .children(FIELDS.into_iter().enumerate().map(|(index, (name, _))| {
                 let focus = &self.pause_menu.focus[index];
                 let value = &draft.fields[index];
                 let edited = editing.is_some() && !draft.saving;
                 let focused = edited && focus.is_focused(window);
-                let field = div()
-                    .id(name)
-                    .border_1()
-                    .rounded_md()
-                    .border_color(rgb(BORDER))
-                    .px_2()
-                    .py_1()
-                    .text_sm()
-                    .min_h(px(28.))
-                    .bg(rgb(SHELL))
-                    .truncate()
+                let field = field_frame(name)
                     .child(if focused && draft.replace != Some(index) {
                         let (left, right) = value.split_at(draft.cursors[index]);
                         format!("{left}▏{right}")
@@ -143,22 +131,15 @@ impl ReviewWindow {
                         value.clone()
                     })
                     .when(edited, |field| {
-                        field
-                            .track_focus(focus)
-                            .tab_index(0)
-                            .tab_stop(active)
-                            .role(gpui::accesskit::Role::TextInput)
-                            .aria_label(name)
-                            .aria_value(value.clone())
-                            .focus(|style| style.border_color(rgb(ACCENT)))
+                        focus_text_field(field, focus, name, value.clone(), active)
                             .when(focused && draft.replace == Some(index), |field| {
-                                field.bg(rgb(ACCENT)).text_color(rgb(SHELL))
+                                field.bg(ACCENT).text_color(SHELL)
                             })
                     });
                 div()
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(SPACE_1)
                     .child(note(name))
                     .child(field)
             }))
@@ -178,7 +159,7 @@ impl ReviewWindow {
                     pane.child(
                         div()
                             .flex()
-                            .gap_2()
+                            .gap(SPACE_2)
                             .child(
                                 action("save-pause-menu", "Save", false)
                                     .tab_stop(active)
@@ -215,9 +196,9 @@ impl ReviewWindow {
         let menu = pending.as_ref().unwrap_or(saved);
         let button = |label: &str| {
             div()
-                .bg(rgb(0x2a3b46))
-                .px_4()
-                .py_2()
+                .bg(PREVIEW_BUTTON)
+                .px(SPACE_4)
+                .py(SPACE_2)
                 .text_center()
                 .child(label.to_owned())
         };
@@ -226,27 +207,32 @@ impl ReviewWindow {
                 .absolute()
                 .inset_0()
                 .block_mouse_except_scroll()
-                .bg(rgba(0x05080aa1))
+                .bg(PREVIEW_DIMMER)
                 .flex()
                 .items_center()
                 .justify_center()
-                .p_3()
+                .p(SPACE_3)
                 .overflow_hidden()
                 .child(
                     div()
                         .w_full()
                         .max_w(px(320.))
-                        .bg(rgb(0x16212a))
-                        .text_color(rgb(0xecf2f6))
+                        .bg(PREVIEW_SURFACE)
+                        .text_color(PREVIEW_TEXT)
                         .flex()
                         .flex_col()
                         .items_center()
-                        .gap_2()
-                        .p_5()
-                        .child(div().text_xl().text_center().child(menu.title.clone()))
+                        .gap(SPACE_2)
+                        .p(SPACE_5)
                         .child(
                             div()
-                                .text_sm()
+                                .text_size(TYPE_TITLE)
+                                .text_center()
+                                .child(menu.title.clone()),
+                        )
+                        .child(
+                            div()
+                                .text_size(TYPE_CONTROL)
                                 .text_center()
                                 .child(menu.sensitivity_label.clone()),
                         )
@@ -254,7 +240,7 @@ impl ReviewWindow {
                             div()
                                 .flex()
                                 .items_center()
-                                .gap_4()
+                                .gap(SPACE_4)
                                 .child(button("-"))
                                 .child(format!("{}%", menu.sensitivity_default))
                                 .child(button("+")),

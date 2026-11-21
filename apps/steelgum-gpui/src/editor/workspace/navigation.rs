@@ -1,25 +1,12 @@
-use super::{
-    ACCENT, BORDER, MUTED, PANEL, ReviewWindow, SHELL, TEXT, Tool, matches_entry, note,
-    sidebar_action, slide,
-};
+use super::{ReviewWindow, Tool, matches_entry, slide};
 use crate::editor::object_rename::object_label;
-use gpui::{AnyElement, Context, Window, div, prelude::*, px, rgb, svg};
+use crate::ui::tokens::{ACCENT, BORDER, MUTED, PANEL, SPACE_1, SPACE_2, SPACE_3, TEXT};
+use crate::ui::{Icon, note, search_field, sidebar_action};
+use gpui::{AnyElement, Context, Window, div, prelude::*, px};
 
 const MENU_WIDTH: f32 = 182.;
-const CHEVRON_RIGHT: &[u8] = include_bytes!("../../../assets/tabler/chevron-right.svg");
-const CHEVRON_DOWN: &[u8] = include_bytes!("../../../assets/tabler/chevron-down.svg");
-
 impl ReviewWindow {
     pub(super) fn navigation(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let focused = self.search_focus.is_focused(window);
-        let search_empty = self.search.is_empty();
-        let search = if search_empty && !focused {
-            "Find a tool".to_owned()
-        } else if focused {
-            format!("{}▏", self.search)
-        } else {
-            self.search.clone()
-        };
         let section_height = (window.viewport_size().height - px(370.)).max(px(96.));
         let searching = !self.search.trim().is_empty();
         let tools: Vec<_> = self.matching_tools().collect();
@@ -27,43 +14,33 @@ impl ReviewWindow {
             .w(px(MENU_WIDTH))
             .h_full()
             .flex_none()
-            .bg(rgb(PANEL))
+            .bg(PANEL)
             .border_r_1()
-            .border_color(rgb(BORDER))
-            .p_3()
+            .border_color(BORDER)
+            .p(SPACE_3)
             .flex()
             .flex_col()
-            .gap_2()
+            .gap(SPACE_2)
             .child(
-                div()
-                    .id("tool-search")
-                    .track_focus(&self.search_focus)
-                    .role(gpui::accesskit::Role::SearchInput)
-                    .aria_label("Find a tool")
-                    .tab_index(0)
-                    .tab_stop(self.menu_open)
-                    .aria_value(self.search.clone())
-                    .on_click(cx.listener(|view, _, window, cx| view.focus_search(window, cx)))
-                    .rounded_md()
-                    .bg(rgb(SHELL))
-                    .px_2()
-                    .py_2()
-                    .cursor_text()
-                    .truncate()
-                    .text_sm()
-                    .text_color(rgb(if focused || !search_empty {
-                        TEXT
-                    } else {
-                        MUTED
-                    }))
-                    .child(format!("⌕  {search}")),
+                search_field(
+                    &self.search,
+                    &self.search_focus,
+                    window,
+                    self.menu_open,
+                    cx.listener(|view, _, window, cx| {
+                        view.search.clear();
+                        view.focus_search(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_click(cx.listener(|view, _, window, cx| view.focus_search(window, cx))),
             )
             .child(
                 div()
                     .id("tool-results")
                     .flex()
                     .flex_col()
-                    .gap_2()
+                    .gap(SPACE_2)
                     .min_h_0()
                     .flex_1()
                     .when(searching, |results| results.overflow_y_scroll())
@@ -72,33 +49,19 @@ impl ReviewWindow {
                         let count = self.project.review.changes().len();
                         let active = self.expanded_tool == Some(tool);
                         let expanded = active || searching;
-                        let asset = if expanded {
-                            CHEVRON_DOWN
+                        let chevron = if expanded {
+                            Icon::ChevronDown
                         } else {
-                            CHEVRON_RIGHT
+                            Icon::ChevronRight
                         };
-                        let label = div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                svg()
-                                    .data(asset)
-                                    .size(px(16.))
-                                    .flex_none()
-                                    .text_color(rgb(if active { ACCENT } else { TEXT })),
-                            )
-                            .child(tool.label());
+                        let label = chevron.label(tool.label(), if active { ACCENT } else { TEXT });
                         let button = sidebar_action(tool.label(), label, active)
                             .w_full()
                             .justify_start()
-                            .gap_2()
+                            .gap(SPACE_2)
                             .when(tool == Tool::Changes && count > 0, |item| {
                                 item.child(
-                                    div()
-                                        .ml_auto()
-                                        .text_color(rgb(MUTED))
-                                        .child(count.to_string()),
+                                    div().ml_auto().text_color(MUTED).child(count.to_string()),
                                 )
                             })
                             .aria_expanded(expanded)
@@ -112,7 +75,7 @@ impl ReviewWindow {
                             .flex()
                             .flex_col()
                             .flex_none()
-                            .gap_1()
+                            .gap(SPACE_1)
                             .child(button)
                             .when(expanded, |row| {
                                 row.child(match tool {
@@ -133,7 +96,7 @@ impl ReviewWindow {
                                         };
                                         div()
                                             .id("section-items")
-                                            .ml_3()
+                                            .ml(SPACE_3)
                                             .max_h(section_height)
                                             .overflow_y_scroll()
                                             .child(body)

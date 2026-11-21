@@ -1,12 +1,11 @@
 //! Validated edits of authored scene properties.
 
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
-use tempfile::NamedTempFile;
 use thiserror::Error;
 
 use crate::{Scene, SceneError, valid_name};
@@ -65,29 +64,16 @@ pub fn rename_object(
         return Ok(());
     }
 
-    let parent = target
-        .parent()
-        .ok_or_else(|| RenameError::InvalidPath(scene_path.to_owned()))?;
-    let mut temporary = NamedTempFile::new_in(parent).map_err(|source| access(&target, source))?;
-    let permissions = fs::metadata(&target)
-        .map_err(|source| access(&target, source))?
-        .permissions();
-    temporary
-        .write_all(changed.as_bytes())
-        .and_then(|_| temporary.as_file().set_permissions(permissions))
-        .and_then(|_| temporary.as_file().sync_all())
-        .map_err(|source| access(&target, source))?;
-    if requested
-        .canonicalize()
-        .map_err(|source| access(&requested, source))?
-        != target
+    if !crate::file_edit::replace_unchanged(
+        &requested,
+        &target,
+        expected.as_bytes(),
+        changed.as_bytes(),
+    )
+    .map_err(|source| access(&target, source))?
     {
         return Err(RenameError::Stale);
     }
-    verify_unchanged(&target, expected)?;
-    temporary
-        .persist(&target)
-        .map_err(|error| access(&target, error.error))?;
     Ok(())
 }
 

@@ -67,9 +67,15 @@ impl ReviewWindow {
 
     fn matching_tools(&self) -> impl Iterator<Item = Tool> + '_ {
         let query = self.search.trim().to_lowercase();
-        [Tool::Objects, Tool::Assets, Tool::Changes, Tool::Build]
-            .into_iter()
-            .filter(move |tool| tool.label().to_lowercase().contains(&query))
+        [
+            Tool::Objects,
+            Tool::Assets,
+            Tool::Changes,
+            Tool::Ui,
+            Tool::Build,
+        ]
+        .into_iter()
+        .filter(move |tool| tool.label().to_lowercase().contains(&query))
     }
 
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -84,7 +90,10 @@ impl ReviewWindow {
             cx.stop_propagation();
             return;
         }
-        if self.handle_object_key(event, window, cx) || self.handle_review_key(event, window, cx) {
+        if self.handle_menu_key(event, window, cx)
+            || self.handle_object_key(event, window, cx)
+            || self.handle_review_key(event, window, cx)
+        {
             cx.stop_propagation();
             return;
         }
@@ -281,7 +290,7 @@ impl ReviewWindow {
         slide("navigation", MENU_WIDTH, self.menu_open, content)
     }
 
-    fn pane(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn pane(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let tool = self.tool.or(self.closing_pane);
         let content = div()
             .w(px(PANE_WIDTH))
@@ -327,6 +336,7 @@ impl ReviewWindow {
                     Tool::Objects => self.scene_objects(cx),
                     Tool::Assets => scroll(self.assets_panel(cx)),
                     Tool::Changes => scroll(self.changes(cx)),
+                    Tool::Ui => scroll(self.pause_menu_panel(window, cx)),
                     Tool::Build => scroll(self.build(cx)),
                 })
                 .when(tool == Tool::Objects, |pane| {
@@ -337,6 +347,8 @@ impl ReviewWindow {
     }
 
     fn scene(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let pause_menu = self.pause_menu_preview();
+        let previewing_menu = pause_menu.is_some();
         let view = self.viewport_view();
         let source = self.project.source.as_ref();
         let title = source.and_then(|(_, path)| path.file_stem()).map_or_else(
@@ -411,6 +423,9 @@ impl ReviewWindow {
                     .flex_1()
                     .min_h_0()
                     .child(surface)
+                    .when_some(pause_menu, |viewport, preview| {
+                        viewport.child(preview)
+                    })
                     .when_some(self.live_issue.as_deref(), |viewport, issue| {
                         viewport.child(
                             div()
@@ -441,13 +456,15 @@ impl ReviewWindow {
                             .truncate()
                             .text_sm()
                             .text_color(rgb(MUTED))
-                            .child(self.build_profile_hint(window).unwrap_or(if self.top_down {
+                            .child(self.build_profile_hint(window).unwrap_or(if previewing_menu {
+                                "Pause menu preview"
+                            } else if self.top_down {
                                 "Click to select · Middle-drag to pan · Scroll to zoom"
                             } else {
                                 "Click to select · Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
                             })),
                     )
-                    .when(self.selected.is_some(), |bar| {
+                    .when(self.selected.is_some() && !previewing_menu, |bar| {
                         let title = if self.focus {
                             "Show Room"
                         } else {
@@ -501,7 +518,7 @@ impl Render for ReviewWindow {
                     .min_h_0()
                     .child(self.navigation(window, cx))
                     .child(self.scene(window, cx))
-                    .child(self.pane(cx)),
+                    .child(self.pane(window, cx)),
             )
     }
 }

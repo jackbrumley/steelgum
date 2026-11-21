@@ -3,6 +3,7 @@ pub(in crate::editor) enum Tool {
     Objects,
     Assets,
     Changes,
+    Ui,
     Build,
 }
 
@@ -12,6 +13,7 @@ impl Tool {
             Self::Objects => "Objects",
             Self::Assets => "Assets",
             Self::Changes => "Changes",
+            Self::Ui => "UI",
             Self::Build => "Build Game",
         }
     }
@@ -21,6 +23,7 @@ impl Tool {
             Self::Objects => "◇",
             Self::Assets => "▦",
             Self::Changes => "⑂",
+            Self::Ui => "▣",
             Self::Build => "⚒",
         }
     }

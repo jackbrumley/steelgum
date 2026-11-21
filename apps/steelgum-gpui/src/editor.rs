@@ -13,6 +13,7 @@ mod assets;
 mod bridge;
 mod live_refresh;
 mod object_rename;
+mod pause_menu;
 mod recent;
 mod review_request;
 mod runner;
@@ -121,6 +122,7 @@ pub(crate) struct ReviewWindow {
     assets: assets::AssetBrowser,
     rename: Option<object_rename::RenameDraft>,
     rename_focus: FocusHandle,
+    pause_menu: pause_menu::MenuEditor,
     objects_focus: FocusHandle,
     review_focus: FocusHandle,
     objects_scroll: ScrollHandle,
@@ -160,6 +162,7 @@ impl ReviewWindow {
             assets: assets::AssetBrowser::default(),
             rename: None,
             rename_focus: cx.focus_handle(),
+            pause_menu: pause_menu::MenuEditor::new(cx),
             objects_focus: cx.focus_handle(),
             review_focus: cx.focus_handle().tab_stop(true),
             objects_scroll: ScrollHandle::new(),
@@ -240,7 +243,7 @@ impl ReviewWindow {
     }
 
     fn open_folder(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.run_state.busy() {
+        if self.loading || self.run_state.busy() || self.pause_menu.saving() {
             return;
         }
         let picker = cx.prompt_for_paths(PathPromptOptions {
@@ -281,6 +284,7 @@ impl ReviewWindow {
                         window.before = false;
                         window.review_draft = ReviewDraft::default();
                         window.rename = None;
+                        window.pause_menu.clear();
                         window.assets = Default::default();
                         window.focus = false;
                         window.viewport.reset_pan();

@@ -1,6 +1,8 @@
 //! Steelgum's authored scene data and validation.
 
 pub mod build;
+mod file_edit;
+pub mod pause_menu;
 pub mod project;
 pub mod review;
 pub mod scene_edit;

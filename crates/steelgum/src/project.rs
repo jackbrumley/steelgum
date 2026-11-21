@@ -3,7 +3,10 @@
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use thiserror::Error;
+
+use crate::pause_menu::PauseMenuConfig;
 
 pub const MANIFEST_FILE: &str = "steelgum.json";
 
@@ -15,6 +18,8 @@ pub struct ProjectManifest {
     pub scene: PathBuf,
     pub runner: Option<CargoRunner>,
     pub assets: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pause_menu: Option<PauseMenuConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,6 +43,13 @@ pub enum ProjectError {
     },
     #[error("invalid {path}: {reason}")]
     Invalid { path: PathBuf, reason: &'static str },
+    #[error("could not save {path}: {source}")]
+    Write {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("steelgum.json changed on disk. Reload the pause menu before saving.")]
+    Stale,
 }
 
 impl ProjectManifest {
@@ -49,22 +61,24 @@ impl ProjectManifest {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(ProjectError::Read { path, source }),
         };
+        Self::parse(&path, &content).map(Some)
+    }
+
+    fn parse(path: &Path, content: &[u8]) -> Result<Self, ProjectError> {
+        let invalid = |reason| ProjectError::Invalid {
+            path: path.to_owned(),
+            reason,
+        };
         let manifest: Self =
-            serde_json::from_slice(&content).map_err(|source| ProjectError::Parse {
-                path: path.clone(),
+            serde_json::from_slice(content).map_err(|source| ProjectError::Parse {
+                path: path.to_owned(),
                 source,
             })?;
         if manifest.version != 1 {
-            return Err(ProjectError::Invalid {
-                path,
-                reason: "unsupported project version",
-            });
+            return Err(invalid("unsupported project version"));
         }
         if manifest.name.trim().is_empty() || manifest.name.chars().any(char::is_control) {
-            return Err(ProjectError::Invalid {
-                path,
-                reason: "the project name must be a single nonempty line",
-            });
+            return Err(invalid("the project name must be a single nonempty line"));
         }
         validate_relative(&manifest.scene)?;
         if let Some(assets) = &manifest.assets {
@@ -79,14 +93,71 @@ impl ProjectManifest {
                     .bytes()
                     .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
             {
-                return Err(ProjectError::Invalid {
-                    path,
-                    reason: "the runner requires a Cargo.toml path and a Cargo binary name",
-                });
+                return Err(invalid(
+                    "the runner requires a Cargo.toml path and a Cargo binary name",
+                ));
             }
         }
-        Ok(Some(manifest))
+        if let Some(menu) = &manifest.pause_menu {
+            menu.validate().map_err(invalid)?;
+        }
+        Ok(manifest)
     }
+}
+
+/// Update the declared pause menu while preserving the rest of the manifest text.
+pub fn save_pause_menu(
+    root: &Path,
+    expected: &PauseMenuConfig,
+    menu: &PauseMenuConfig,
+) -> Result<(), ProjectError> {
+    let relative = Path::new(MANIFEST_FILE);
+    let requested = root.join(relative);
+    let path = resolve_project_path(root, relative)?;
+    let original = std::fs::read_to_string(&path).map_err(|source| ProjectError::Read {
+        path: path.clone(),
+        source,
+    })?;
+    let manifest = ProjectManifest::parse(&path, original.as_bytes())?;
+    if manifest.pause_menu.as_ref() != Some(expected) {
+        return Err(ProjectError::Stale);
+    }
+    if menu == expected {
+        return Ok(());
+    }
+
+    #[derive(Deserialize)]
+    struct MenuLayout<'a> {
+        #[serde(borrow)]
+        pause_menu: &'a RawValue,
+    }
+    let parse_error = |source| ProjectError::Parse {
+        path: path.clone(),
+        source,
+    };
+    let layout: MenuLayout<'_> = serde_json::from_str(&original).map_err(parse_error)?;
+    let previous = layout.pause_menu.get();
+    let offset = previous.as_ptr().addr() - original.as_ptr().addr();
+    let serialized = serde_json::to_string_pretty(menu).map_err(parse_error)?;
+    let line = original[..offset].rsplit('\n').next().unwrap_or_default();
+    let indent = &line[..line.len() - line.trim_start().len()];
+    let mut changed = original.clone();
+    changed.replace_range(
+        offset..offset + previous.len(),
+        &serialized.replace('\n', &format!("\n{indent}")),
+    );
+    ProjectManifest::parse(&path, changed.as_bytes())?;
+    if !crate::file_edit::replace_unchanged(
+        &requested,
+        &path,
+        original.as_bytes(),
+        changed.as_bytes(),
+    )
+    .map_err(|source| ProjectError::Write { path, source })?
+    {
+        return Err(ProjectError::Stale);
+    }
+    Ok(())
 }
 
 fn validate_relative(path: &Path) -> Result<(), ProjectError> {
@@ -127,6 +198,41 @@ fn canonicalize(path: &Path) -> Result<PathBuf, ProjectError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pause_menu_edits_validate_and_preserve_other_manifest_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let path = root.join(MANIFEST_FILE);
+        let existing = PauseMenuConfig::default();
+        let manifest = format!(
+            "{{\"version\":1, \"name\":\"Edited by another agent\", \"scene\":\"room.json\", \"pause_menu\":{}}}\n",
+            serde_json::to_string(&existing).unwrap(),
+        );
+        std::fs::write(&path, &manifest).unwrap();
+        let mut edited = PauseMenuConfig {
+            title: "Break time".into(),
+            sensitivity_default: 151,
+            ..existing.clone()
+        };
+        assert!(matches!(
+            save_pause_menu(root, &existing, &edited),
+            Err(ProjectError::Invalid { .. })
+        ));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), manifest);
+
+        edited.sensitivity_default = 35;
+        save_pause_menu(root, &existing, &edited).unwrap();
+        assert!(std::fs::read_to_string(path).unwrap().starts_with(
+            "{\"version\":1, \"name\":\"Edited by another agent\", \"scene\":\"room.json\", \"pause_menu\":"
+        ));
+        let loaded = ProjectManifest::discover(root).unwrap().unwrap();
+        assert_eq!(loaded.pause_menu.as_ref(), Some(&edited));
+        assert!(matches!(
+            save_pause_menu(root, &existing, &existing),
+            Err(ProjectError::Stale)
+        ));
+    }
 
     #[test]
     fn discovers_manifest_and_rejects_paths_leaving_the_project() {

@@ -96,6 +96,14 @@ same manifest discovery and Git comparison. The agent JSON interface
 inspects projects, resolves selected objects by stable ID, and formats review
 requests.
 
+Projects can declare a `pause_menu` in `steelgum.json` with `title`,
+`sensitivity_label`, `resume_label`, and whole-number percentage fields
+`sensitivity_default`, `sensitivity_min`, `sensitivity_max`, and
+`sensitivity_step`. Labels use 1–24 printable ASCII characters for the
+game's built-in font. The UI tool previews the settings over the scene and
+saves edits to the same manifest that the game loads at startup. The game
+owns input, cursor capture, and the player's current sensitivity.
+
 Scene names are optional display labels. Renaming uses the loaded worktree
 bytes to detect stale edits and writes a validated scene atomically. IDs
 remain the keys referenced by gameplay and Git comparison. Assets are files

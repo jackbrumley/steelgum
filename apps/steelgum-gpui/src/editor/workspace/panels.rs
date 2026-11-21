@@ -1,10 +1,19 @@
-use gpui::{AnyElement, ClickEvent, Context, div, prelude::*, px, rgb};
+use gpui::{AnyElement, ClickEvent, Context, Window, div, prelude::*, px, rgb};
 use steelgum::review::ObjectChanges;
 
 use super::{
     ACCENT, BORDER, ERROR, Job, MUTED, PANEL, ReviewWindow, RunState, SELECTED, Tool, action, note,
 };
 use crate::editor::{label, object_rename::object_label};
+
+const BUILD_PROFILES: [(&str, bool, &str); 2] = [
+    ("Debug", false, "Build faster for development and testing."),
+    (
+        "Release",
+        true,
+        "Build with optimizations for better game performance.",
+    ),
+];
 
 impl ReviewWindow {
     pub(super) fn changes(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -282,16 +291,32 @@ impl ReviewWindow {
             pane =
                 pane.child(note("Target · This computer"))
                     .child(div().flex().gap_2().children(
-                        [("Debug", false), ("Release", true)].map(|(title, release)| {
-                            action(title, title, self.release == release)
-                                .flex_1()
-                                .on_click(cx.listener(move |view, _, _, cx| {
-                                    if !view.run_state.busy() {
-                                        view.release = release;
+                        BUILD_PROFILES.into_iter().enumerate().map(
+                            |(index, (title, release, hint))| {
+                                action(title, title, self.release == release)
+                                    .track_focus(&self.build_profile_focus[index])
+                                    .tab_stop(self.tool == Some(Tool::Build))
+                                    .aria_description(hint)
+                                    .flex_1()
+                                    .on_hover(cx.listener(move |view, hovered, _, cx| {
+                                        if view.tool != Some(Tool::Build) {
+                                            return;
+                                        }
+                                        if *hovered {
+                                            view.hovered_build_profile = Some(index);
+                                        } else if view.hovered_build_profile == Some(index) {
+                                            view.hovered_build_profile = None;
+                                        }
                                         cx.notify();
-                                    }
-                                }))
-                        }),
+                                    }))
+                                    .on_click(cx.listener(move |view, _, _, cx| {
+                                        if !view.run_state.busy() {
+                                            view.release = release;
+                                            cx.notify();
+                                        }
+                                    }))
+                            },
+                        ),
                     ))
                     .child(
                         action("run-build", "Build", false)
@@ -333,6 +358,20 @@ impl ReviewWindow {
             )
         })
         .into_any_element()
+    }
+
+    pub(super) fn build_profile_hint(&self, window: &Window) -> Option<&'static str> {
+        if self.tool != Some(Tool::Build) || !self.project.can_build() {
+            return None;
+        }
+        let index = if window.last_input_was_keyboard() {
+            self.build_profile_focus
+                .iter()
+                .position(|focus| focus.is_focused(window))
+        } else {
+            self.hovered_build_profile
+        }?;
+        Some(BUILD_PROFILES[index].2)
     }
 }
 

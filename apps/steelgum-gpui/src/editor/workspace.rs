@@ -23,6 +23,9 @@ const PANE_WIDTH: f32 = 258.;
 
 impl ReviewWindow {
     pub(super) fn show_tool(&mut self, tool: Tool) {
+        if self.tool != Some(tool) {
+            self.hovered_build_profile = None;
+        }
         self.tool = Some(tool);
         self.closing_pane = None;
         self.reveal_selected_object();
@@ -314,6 +317,7 @@ impl ReviewWindow {
                                 .tab_stop(self.tool.is_some())
                                 .on_click(cx.listener(|view, _, window, cx| {
                                     view.closing_pane = view.tool.take();
+                                    view.hovered_build_profile = None;
                                     view.workspace_focus.focus(window, cx);
                                     cx.notify();
                                 })),
@@ -332,7 +336,7 @@ impl ReviewWindow {
         slide("tool-pane", PANE_WIDTH, self.tool.is_some(), content)
     }
 
-    fn scene(&self, cx: &mut Context<Self>) -> Div {
+    fn scene(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let view = self.viewport_view();
         let source = self.project.source.as_ref();
         let title = source.and_then(|(_, path)| path.file_stem()).map_or_else(
@@ -437,11 +441,11 @@ impl ReviewWindow {
                             .truncate()
                             .text_sm()
                             .text_color(rgb(MUTED))
-                            .child(if self.top_down {
+                            .child(self.build_profile_hint(window).unwrap_or(if self.top_down {
                                 "Click to select · Middle-drag to pan · Scroll to zoom"
                             } else {
                                 "Click to select · Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
-                            }),
+                            })),
                     )
                     .when(self.selected.is_some(), |bar| {
                         let title = if self.focus {
@@ -496,7 +500,7 @@ impl Render for ReviewWindow {
                     .flex_1()
                     .min_h_0()
                     .child(self.navigation(window, cx))
-                    .child(self.scene(cx))
+                    .child(self.scene(window, cx))
                     .child(self.pane(cx)),
             )
     }

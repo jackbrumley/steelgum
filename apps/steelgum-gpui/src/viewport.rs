@@ -78,6 +78,18 @@ impl Viewport {
         self.surface.reset_pan();
     }
 
+    pub fn target(&self, view: &View) -> [f32; 3] {
+        #[cfg(any(target_os = "linux", windows))]
+        {
+            self.surface.target(view)
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            let _ = view;
+            [0.; 3]
+        }
+    }
+
     pub fn element(&self, view: View, select: impl Fn(String) + 'static) -> AnyElement {
         #[cfg(any(target_os = "linux", windows))]
         {

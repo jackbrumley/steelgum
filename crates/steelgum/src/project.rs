@@ -1,5 +1,6 @@
 //! Project discovery shared by desktop and command-line clients.
 
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,16 @@ pub struct ProjectManifest {
     pub assets: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pause_menu: Option<PauseMenuConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub screens: Vec<ScreenDefinition>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenDefinition {
+    pub id: String,
+    pub title: String,
+    pub button_label: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -48,7 +59,7 @@ pub enum ProjectError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("steelgum.json changed on disk. Reload the pause menu before saving.")]
+    #[error("steelgum.json changed on disk. Refresh the project and try again.")]
     Stale,
 }
 
@@ -101,8 +112,75 @@ impl ProjectManifest {
         if let Some(menu) = &manifest.pause_menu {
             menu.validate().map_err(invalid)?;
         }
+        let mut ids = HashSet::new();
+        for screen in &manifest.screens {
+            if !crate::valid_id(&screen.id) || screen.id == "pause-menu" || !ids.insert(&screen.id)
+            {
+                return Err(invalid(
+                    "screen IDs must be unique and pause-menu is reserved",
+                ));
+            }
+            if !crate::pause_menu::valid_label(&screen.title)
+                || !crate::pause_menu::valid_label(&screen.button_label)
+            {
+                return Err(invalid(
+                    "screen labels need 1 to 24 printable ASCII characters",
+                ));
+            }
+        }
         Ok(manifest)
     }
+}
+
+/// Append a screen template to the existing manifest and return its stable ID.
+pub fn create_screen(root: &Path) -> Result<ScreenDefinition, ProjectError> {
+    edit_manifest(root, |path, original, manifest| {
+        let (id, title, button_label) = if manifest.screens.is_empty() {
+            ("main-menu".to_owned(), "Main Menu", "Play")
+        } else {
+            let id = (2..)
+                .map(|number| format!("screen-{number}"))
+                .find(|id| manifest.screens.iter().all(|screen| screen.id != *id))
+                .expect("a finite screen list cannot occupy all IDs");
+            (id, "New Screen", "Continue")
+        };
+        let screen = ScreenDefinition {
+            id,
+            title: title.into(),
+            button_label: button_label.into(),
+        };
+        #[derive(Deserialize)]
+        struct ScreenLayout<'a> {
+            #[serde(borrow)]
+            screens: Option<&'a RawValue>,
+        }
+        let error = |source| ProjectError::Parse {
+            path: path.to_owned(),
+            source,
+        };
+        let layout: ScreenLayout<'_> = serde_json::from_str(original).map_err(error)?;
+        let entry = serde_json::to_string(&screen).map_err(error)?;
+        let mut changed = original.to_owned();
+        if let Some(screens) = layout.screens {
+            let list = screens.get();
+            let offset = list.as_ptr().addr() - original.as_ptr().addr();
+            crate::file_edit::append_json(
+                &mut changed,
+                offset..offset + list.len(),
+                &entry,
+                !manifest.screens.is_empty(),
+            );
+        } else {
+            let end = original.trim_end().len();
+            crate::file_edit::append_json(
+                &mut changed,
+                0..end,
+                &format!("\"screens\": [{entry}]"),
+                true,
+            );
+        }
+        Ok((changed, screen))
+    })
 }
 
 /// Update the declared pause menu while preserving the rest of the manifest text.
@@ -111,6 +189,41 @@ pub fn save_pause_menu(
     expected: &PauseMenuConfig,
     menu: &PauseMenuConfig,
 ) -> Result<(), ProjectError> {
+    edit_manifest(root, |path, original, manifest| {
+        if manifest.pause_menu.as_ref() != Some(expected) {
+            return Err(ProjectError::Stale);
+        }
+        if menu == expected {
+            return Ok((original.to_owned(), ()));
+        }
+        #[derive(Deserialize)]
+        struct MenuLayout<'a> {
+            #[serde(borrow)]
+            pause_menu: &'a RawValue,
+        }
+        let parse_error = |source| ProjectError::Parse {
+            path: path.to_owned(),
+            source,
+        };
+        let layout: MenuLayout<'_> = serde_json::from_str(original).map_err(parse_error)?;
+        let previous = layout.pause_menu.get();
+        let offset = previous.as_ptr().addr() - original.as_ptr().addr();
+        let serialized = serde_json::to_string_pretty(menu).map_err(parse_error)?;
+        let line = original[..offset].rsplit('\n').next().unwrap_or_default();
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let mut changed = original.to_owned();
+        changed.replace_range(
+            offset..offset + previous.len(),
+            &serialized.replace('\n', &format!("\n{indent}")),
+        );
+        Ok((changed, ()))
+    })
+}
+
+fn edit_manifest<T>(
+    root: &Path,
+    edit: impl FnOnce(&Path, &str, &ProjectManifest) -> Result<(String, T), ProjectError>,
+) -> Result<T, ProjectError> {
     let relative = Path::new(MANIFEST_FILE);
     let requested = root.join(relative);
     let path = resolve_project_path(root, relative)?;
@@ -119,33 +232,10 @@ pub fn save_pause_menu(
         source,
     })?;
     let manifest = ProjectManifest::parse(&path, original.as_bytes())?;
-    if manifest.pause_menu.as_ref() != Some(expected) {
-        return Err(ProjectError::Stale);
+    let (changed, result) = edit(&path, &original, &manifest)?;
+    if changed == original {
+        return Ok(result);
     }
-    if menu == expected {
-        return Ok(());
-    }
-
-    #[derive(Deserialize)]
-    struct MenuLayout<'a> {
-        #[serde(borrow)]
-        pause_menu: &'a RawValue,
-    }
-    let parse_error = |source| ProjectError::Parse {
-        path: path.clone(),
-        source,
-    };
-    let layout: MenuLayout<'_> = serde_json::from_str(&original).map_err(parse_error)?;
-    let previous = layout.pause_menu.get();
-    let offset = previous.as_ptr().addr() - original.as_ptr().addr();
-    let serialized = serde_json::to_string_pretty(menu).map_err(parse_error)?;
-    let line = original[..offset].rsplit('\n').next().unwrap_or_default();
-    let indent = &line[..line.len() - line.trim_start().len()];
-    let mut changed = original.clone();
-    changed.replace_range(
-        offset..offset + previous.len(),
-        &serialized.replace('\n', &format!("\n{indent}")),
-    );
     ProjectManifest::parse(&path, changed.as_bytes())?;
     if !crate::file_edit::replace_unchanged(
         &requested,
@@ -157,7 +247,7 @@ pub fn save_pause_menu(
     {
         return Err(ProjectError::Stale);
     }
-    Ok(())
+    Ok(result)
 }
 
 fn validate_relative(path: &Path) -> Result<(), ProjectError> {
@@ -198,6 +288,27 @@ fn canonicalize(path: &Path) -> Result<PathBuf, ProjectError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn creates_multiple_screens_and_preserves_existing_definitions() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let path = root.join(MANIFEST_FILE);
+        let original = "{\"version\":1,\"name\":\"Keep this formatting\",\"scene\":\"room.json\"";
+        std::fs::write(&path, format!("{original}}}\n")).unwrap();
+        let main = create_screen(root).unwrap();
+        let other = create_screen(root).unwrap();
+        assert_eq!(
+            (main.id.as_str(), main.button_label.as_str()),
+            ("main-menu", "Play")
+        );
+        assert_ne!(main.id, other.id);
+        assert!(std::fs::read_to_string(path).unwrap().starts_with(original));
+        assert_eq!(
+            ProjectManifest::discover(root).unwrap().unwrap().screens,
+            [main, other]
+        );
+    }
 
     #[test]
     fn pause_menu_edits_validate_and_preserve_other_manifest_text() {

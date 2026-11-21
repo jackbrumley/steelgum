@@ -7366,6 +7366,7 @@ dependencies = [
  "chrono",
  "gpui_interop",
  "image",
+ "open",
  "raw-window-handle",
  "serde",
  "serde_json",

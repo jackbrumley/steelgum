@@ -4,6 +4,7 @@ use gpui::{
     SpringConfig, Stateful, Window, div, prelude::*, px, rgb,
 };
 
+mod navigation;
 mod panels;
 mod tool;
 
@@ -18,7 +19,6 @@ pub(super) const MUTED: u32 = 0xaab4c6;
 pub(super) const ACCENT: u32 = 0xbab5ff;
 const SELECTED: u32 = 0x353451;
 const ERROR: u32 = 0xffb5b4;
-const MENU_WIDTH: f32 = 182.;
 const PANE_WIDTH: f32 = 258.;
 
 impl ReviewWindow {
@@ -26,13 +26,18 @@ impl ReviewWindow {
         if self.tool != Some(tool) {
             self.hovered_build_profile = None;
         }
+        self.definitions.ui_expanded = tool == Tool::Ui;
         self.tool = Some(tool);
         self.closing_pane = None;
         self.reveal_selected_object();
     }
 
     fn activate_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
-        self.show_tool(tool);
+        if tool == Tool::Ui {
+            self.toggle_ui_section();
+        } else {
+            self.show_tool(tool);
+        }
         if tool == Tool::Assets {
             self.refresh_assets(cx);
         }
@@ -75,7 +80,10 @@ impl ReviewWindow {
             Tool::Build,
         ]
         .into_iter()
-        .filter(move |tool| tool.label().to_lowercase().contains(&query))
+        .filter(move |tool| {
+            tool.label().to_lowercase().contains(&query)
+                || (*tool == Tool::Ui && self.screen_matches(&query))
+        })
     }
 
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -203,93 +211,6 @@ impl ReviewWindow {
             )
     }
 
-    fn navigation(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
-        let focused = self.search_focus.is_focused(window);
-        let search_empty = self.search.is_empty();
-        let search = if search_empty && !focused {
-            "Find a tool".to_owned()
-        } else if focused {
-            format!("{}▏", self.search)
-        } else {
-            self.search.clone()
-        };
-        let tools: Vec<_> = self.matching_tools().collect();
-        let content = div()
-            .w(px(MENU_WIDTH))
-            .h_full()
-            .flex_none()
-            .bg(rgb(PANEL))
-            .border_r_1()
-            .border_color(rgb(BORDER))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .id("tool-search")
-                    .track_focus(&self.search_focus)
-                    .role(gpui::accesskit::Role::SearchInput)
-                    .aria_label("Find a tool")
-                    .tab_index(0)
-                    .tab_stop(self.menu_open)
-                    .aria_value(self.search.clone())
-                    .on_click(cx.listener(|view, _, window, cx| view.focus_search(window, cx)))
-                    .border_1()
-                    .border_color(rgb(if focused { ACCENT } else { BORDER }))
-                    .rounded_md()
-                    .bg(rgb(SHELL))
-                    .px_2()
-                    .py_2()
-                    .cursor_text()
-                    .truncate()
-                    .text_sm()
-                    .text_color(rgb(if focused || !search_empty {
-                        TEXT
-                    } else {
-                        MUTED
-                    }))
-                    .child(format!("⌕  {search}")),
-            )
-            .when(tools.is_empty(), |menu| menu.child(note("No tools found")))
-            .children(tools.into_iter().map(|tool| {
-                let count = self.project.review.changes().len();
-                action(
-                    tool.label(),
-                    format!("{}   {}", tool.icon(), tool.label()),
-                    self.tool == Some(tool),
-                )
-                .bg(rgb(if self.tool == Some(tool) {
-                    SELECTED
-                } else {
-                    PANEL
-                }))
-                .border_color(rgb(if self.tool == Some(tool) {
-                    SELECTED
-                } else {
-                    PANEL
-                }))
-                .w_full()
-                .justify_start()
-                .gap_2()
-                .when(tool == Tool::Changes && count > 0, |item| {
-                    item.child(
-                        div()
-                            .ml_auto()
-                            .text_color(rgb(MUTED))
-                            .child(count.to_string()),
-                    )
-                })
-                .tab_stop(self.menu_open)
-                .on_click(cx.listener(move |view, _, _, cx| {
-                    if view.menu_open {
-                        view.activate_tool(tool, cx);
-                    }
-                }))
-            }));
-        slide("navigation", MENU_WIDTH, self.menu_open, content)
-    }
-
     fn pane(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let tool = self.tool.or(self.closing_pane);
         let content = div()
@@ -318,7 +239,11 @@ impl ReviewWindow {
                             div()
                                 .flex_1()
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .child(tool.label()),
+                                .child(if tool == Tool::Ui {
+                                    self.screen_title().to_owned()
+                                } else {
+                                    tool.label().to_owned()
+                                }),
                         )
                         .child(
                             action("close-pane", "×", false)
@@ -336,7 +261,7 @@ impl ReviewWindow {
                     Tool::Objects => self.scene_objects(cx),
                     Tool::Assets => scroll(self.assets_panel(cx)),
                     Tool::Changes => scroll(self.changes(cx)),
-                    Tool::Ui => scroll(self.pause_menu_panel(window, cx)),
+                    Tool::Ui => scroll(self.screen_properties(window, cx)),
                     Tool::Build => scroll(self.build(cx)),
                 })
                 .when(tool == Tool::Objects, |pane| {
@@ -347,8 +272,8 @@ impl ReviewWindow {
     }
 
     fn scene(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let pause_menu = self.pause_menu_preview();
-        let previewing_menu = pause_menu.is_some();
+        let screen = self.screen_preview();
+        let previewing_screen = screen.is_some();
         let view = self.viewport_view();
         let source = self.project.source.as_ref();
         let title = source.and_then(|(_, path)| path.file_stem()).map_or_else(
@@ -423,7 +348,7 @@ impl ReviewWindow {
                     .flex_1()
                     .min_h_0()
                     .child(surface)
-                    .when_some(pause_menu, |viewport, preview| {
+                    .when_some(screen, |viewport, preview| {
                         viewport.child(preview)
                     })
                     .when_some(self.live_issue.as_deref(), |viewport, issue| {
@@ -456,15 +381,15 @@ impl ReviewWindow {
                             .truncate()
                             .text_sm()
                             .text_color(rgb(MUTED))
-                            .child(self.build_profile_hint(window).unwrap_or(if previewing_menu {
-                                "Pause menu preview"
+                            .child(self.build_profile_hint(window).unwrap_or(if previewing_screen {
+                                "UI preview"
                             } else if self.top_down {
                                 "Click to select · Middle-drag to pan · Scroll to zoom"
                             } else {
                                 "Click to select · Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
                             })),
                     )
-                    .when(self.selected.is_some() && !previewing_menu, |bar| {
+                    .when(self.selected.is_some() && !previewing_screen, |bar| {
                         let title = if self.focus {
                             "Show Room"
                         } else {

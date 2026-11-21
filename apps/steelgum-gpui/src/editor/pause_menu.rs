@@ -118,7 +118,7 @@ impl ReviewWindow {
             .child(
                 div()
                     .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .child("Pause Menu"),
+                    .child("Settings"),
             )
             .children(FIELDS.into_iter().enumerate().map(|(index, (name, _))| {
                 let focus = &self.pause_menu.focus[index];
@@ -271,7 +271,8 @@ impl ReviewWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.tool != Some(Tool::Ui) || self.pause_menu.saving() {
+        if self.tool != Some(Tool::Ui) || self.pause_menu.saving() || self.custom_screen().is_some()
+        {
             return false;
         }
         let Some(index) = self
@@ -469,7 +470,10 @@ mod tests {
         let window = app.open_window(size(px(1024.), px(700.)), |window, cx| {
             cx.new(|cx| {
                 let mut view = ReviewWindow::new(project, cx);
-                view.show_tool(Tool::Ui);
+                view.toggle_ui_section();
+                assert!(view.definitions.ui_expanded && view.tool.is_none());
+                assert!(view.screen_preview().is_none());
+                view.select_screen("pause-menu".into());
                 view.begin_menu_edit(window, cx);
                 view
             })
@@ -487,9 +491,9 @@ mod tests {
         })?;
         app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
         let edited = app.capture_screenshot(window.into())?;
-        if let Some(directory) = std::env::var_os("STEELGUM_SNAPSHOT_DIR") {
-            let directory = PathBuf::from(directory);
-            std::fs::create_dir_all(&directory)?;
+        let snapshot_dir = std::env::var_os("STEELGUM_SNAPSHOT_DIR").map(PathBuf::from);
+        if let Some(directory) = &snapshot_dir {
+            std::fs::create_dir_all(directory)?;
             before.save(directory.join("steelgum-pause-menu-original.png"))?;
             edited.save(directory.join("steelgum-pause-menu.png"))?;
         }
@@ -516,6 +520,38 @@ mod tests {
             .pause_menu
             .unwrap();
         assert_eq!(saved.title, "hold");
+        app.update(|cx| window.update(cx, |view, _, cx| view.new_screen(cx)))?;
+        let start = Instant::now();
+        loop {
+            app.run_until_parked();
+            if !app.update(|cx| window.update(cx, |view, _, _| view.definitions.writing))? {
+                break;
+            }
+            ensure!(
+                start.elapsed() < Duration::from_secs(5),
+                "screen creation timed out"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let manifest = ProjectManifest::discover(root)?.unwrap();
+        assert_eq!(manifest.screens[0].id, "main-menu");
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                assert_eq!(view.custom_screen(), manifest.screens.first());
+            })
+        })?;
+        app.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
+        let main_menu = app.capture_screenshot(window.into())?;
+        assert_ne!(main_menu, edited);
+        if let Some(directory) = &snapshot_dir {
+            main_menu.save(directory.join("steelgum-main-menu.png"))?;
+        }
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                view.show_tool(Tool::Objects);
+                assert!(!view.definitions.ui_expanded && view.screen_preview().is_none());
+            })
+        })?;
         Ok(())
     }
 }

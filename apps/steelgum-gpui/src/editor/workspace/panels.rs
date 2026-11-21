@@ -121,7 +121,7 @@ impl ReviewWindow {
 
     pub(super) fn scene_objects(&self, cx: &mut Context<Self>) -> AnyElement {
         let scene = self.scene_revision();
-        div()
+        let list = div()
             .id("objects-list")
             .track_focus(&self.objects_focus)
             .tab_index(0)
@@ -143,7 +143,16 @@ impl ReviewWindow {
                     .objects()
                     .iter()
                     .map(|object| self.object_row(&object.id, None, cx)),
-            )
+            );
+        div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .when(self.project.source.is_some(), |pane| {
+                pane.child(self.object_definition_tools(cx))
+            })
+            .child(list)
             .into_any_element()
     }
 

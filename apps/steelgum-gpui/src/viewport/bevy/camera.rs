@@ -53,6 +53,17 @@ impl Orbit {
         self.map_pan = Vec3::ZERO;
     }
 
+    pub(super) fn target(self, view: &View) -> Vec3 {
+        let center =
+            focused_object(view).map_or(Vec3::ZERO, |object| Vec3::from_array(object.center));
+        center
+            + if view.top_down {
+                self.map_pan
+            } else {
+                self.pan
+            }
+    }
+
     pub(super) fn rotate(&mut self, dx: f32, dy: f32) {
         self.yaw -= dx * 0.007;
         self.pitch = (self.pitch + dy * 0.007).clamp(0.12, 1.48);
@@ -97,10 +108,9 @@ pub(super) fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: 
 }
 
 fn camera_pose(view: &View, orbit: Orbit, size: [u32; 2]) -> (Transform, Projection) {
-    let center = focused_object(view).map_or(Vec3::ZERO, |object| Vec3::from_array(object.center));
+    let target = orbit.target(view);
     let distance = camera_distance(view, orbit, size);
     if view.top_down {
-        let target = center + orbit.map_pan;
         (
             Transform::from_translation(target + Vec3::Y * 20.).looking_at(target, Vec3::NEG_Z),
             OrthographicProjection {
@@ -112,7 +122,6 @@ fn camera_pose(view: &View, orbit: Orbit, size: [u32; 2]) -> (Transform, Project
             .into(),
         )
     } else {
-        let target = center + orbit.pan;
         (
             Transform::from_translation(target + orbit.direction() * distance)
                 .looking_at(target, Vec3::Y),

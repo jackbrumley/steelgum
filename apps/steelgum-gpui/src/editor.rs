@@ -11,6 +11,7 @@ use crate::viewport::{View, Viewport};
 pub(crate) mod agent;
 mod assets;
 mod bridge;
+mod definitions;
 mod live_refresh;
 mod object_rename;
 mod pause_menu;
@@ -123,6 +124,7 @@ pub(crate) struct ReviewWindow {
     rename: Option<object_rename::RenameDraft>,
     rename_focus: FocusHandle,
     pause_menu: pause_menu::MenuEditor,
+    definitions: definitions::DefinitionTools,
     objects_focus: FocusHandle,
     review_focus: FocusHandle,
     objects_scroll: ScrollHandle,
@@ -163,6 +165,7 @@ impl ReviewWindow {
             rename: None,
             rename_focus: cx.focus_handle(),
             pause_menu: pause_menu::MenuEditor::new(cx),
+            definitions: Default::default(),
             objects_focus: cx.focus_handle(),
             review_focus: cx.focus_handle().tab_stop(true),
             objects_scroll: ScrollHandle::new(),
@@ -177,7 +180,7 @@ impl ReviewWindow {
             viewport_fps: 0,
             top_down: false,
             menu_open: true,
-            tool: Some(Tool::Changes),
+            tool: None,
             closing_pane: None,
             search_focus: cx.focus_handle().tab_stop(true),
             workspace_focus: cx.focus_handle(),
@@ -243,7 +246,11 @@ impl ReviewWindow {
     }
 
     fn open_folder(&mut self, cx: &mut Context<Self>) {
-        if self.loading || self.run_state.busy() || self.pause_menu.saving() {
+        if self.loading
+            || self.run_state.busy()
+            || self.pause_menu.saving()
+            || self.definitions.writing
+        {
             return;
         }
         let picker = cx.prompt_for_paths(PathPromptOptions {
@@ -285,11 +292,13 @@ impl ReviewWindow {
                         window.review_draft = ReviewDraft::default();
                         window.rename = None;
                         window.pause_menu.clear();
+                        window.definitions = Default::default();
                         window.assets = Default::default();
                         window.focus = false;
                         window.viewport.reset_pan();
                         window.run_state = RunState::Idle;
-                        window.show_tool(Tool::Changes);
+                        window.tool = None;
+                        window.closing_pane = None;
                     }
                     Ok(None) => {}
                     Err(error) => window.status = Some(error.to_string()),
@@ -345,7 +354,8 @@ mod tests {
         let sample = Project::demo(crate::demo()?);
         let window = app.open_window(size(px(980.), px(650.)), |window, cx| {
             cx.new(|cx| {
-                let workspace = ReviewWindow::new(sample, cx);
+                let mut workspace = ReviewWindow::new(sample, cx);
+                workspace.show_tool(Tool::Changes);
                 workspace.focus(window, cx);
                 workspace
             })

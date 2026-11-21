@@ -104,6 +104,19 @@ game's built-in font. The UI tool previews the settings over the scene and
 saves edits to the same manifest that the game loads at startup. The game
 owns input, cursor capture, and the player's current sensitivity.
 
+The optional `screens` list adds screens with a stable `id`, a `title`,
+and a `button_label`. Expand **UI** in the tool sidebar, then select a
+screen to open its preview and properties. Choosing another tool
+collapses the screen list.
+**New Screen** appends a template. **Open Definition** opens the manifest
+or the current scene file in the application configured by `VISUAL`,
+`EDITOR`, or the system's file association. Game code decides when to
+show each screen and what its button does.
+
+**Objects → Add Box** appends a unit box near the viewport target in the
+working scene and selects it on refresh. It keeps the source formatting
+for existing objects and rejects writes against stale scene contents.
+
 Scene names are optional display labels. Renaming uses the loaded worktree
 bytes to detect stale edits and writes a validated scene atomically. IDs
 remain the keys referenced by gameplay and Git comparison. Assets are files

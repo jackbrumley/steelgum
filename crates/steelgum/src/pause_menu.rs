@@ -32,11 +32,7 @@ impl PauseMenuConfig {
     pub fn validate(&self) -> Result<(), &'static str> {
         if [&self.title, &self.sensitivity_label, &self.resume_label]
             .into_iter()
-            .any(|label| {
-                label.trim().is_empty()
-                    || label.len() > 24
-                    || !label.bytes().all(|byte| matches!(byte, b' '..=b'~'))
-            })
+            .any(|label| !valid_label(label))
         {
             return Err("Menu labels need 1 to 24 printable ASCII characters.");
         }
@@ -67,4 +63,10 @@ impl PauseMenuConfig {
             .saturating_add(self.sensitivity_step)
             .min(self.sensitivity_max)
     }
+}
+
+pub(crate) fn valid_label(label: &str) -> bool {
+    !label.trim().is_empty()
+        && label.len() <= 24
+        && label.bytes().all(|byte| matches!(byte, b' '..=b'~'))
 }

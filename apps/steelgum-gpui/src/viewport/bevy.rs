@@ -444,6 +444,10 @@ impl Surface {
         self.orbit.set(orbit);
     }
 
+    pub fn target(&self, view: &View) -> [f32; 3] {
+        self.orbit.get().target(view).to_array()
+    }
+
     pub fn element(&self, view: View, select: impl Fn(String) + 'static) -> AnyElement {
         let (renderer, error, orbit) = (
             self.renderer.clone(),

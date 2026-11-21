@@ -189,6 +189,7 @@ impl ReviewWindow {
                     self.focus = false;
                 }
                 self.project.review = Rc::new(review);
+                self.select_created_object(cx);
                 self.reveal_selected_object();
                 self.live_issue = None;
             }

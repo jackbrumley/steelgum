@@ -79,13 +79,7 @@ impl Scene {
 
         let mut ids = HashSet::new();
         for object in &scene.objects {
-            if object.id.is_empty()
-                || !object.id.bytes().all(|byte| {
-                    byte.is_ascii_lowercase()
-                        || byte.is_ascii_digit()
-                        || matches!(byte, b'-' | b'_')
-                })
-            {
+            if !valid_id(&object.id) {
                 return Err(SceneError::InvalidId(object.id.clone()));
             }
             if !ids.insert(&object.id) {
@@ -117,6 +111,13 @@ impl Scene {
     pub fn to_json(&self) -> Result<String, SceneError> {
         Ok(serde_json::to_string_pretty(&self.0)?)
     }
+}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
+        })
 }
 
 fn valid_name(name: &str) -> bool {

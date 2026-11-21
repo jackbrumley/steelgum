@@ -1,0 +1,11 @@
+config_version=5
+
+[application]
+config/name="Steelgum LibGodot probe"
+
+[display]
+window/size/viewport_width=256
+window/size/viewport_height=160
+
+[rendering]
+renderer/rendering_method="gl_compatibility"

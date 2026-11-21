@@ -1,4 +1,6 @@
 mod editor;
+#[cfg(all(test, target_os = "linux"))]
+mod libgodot_probe;
 mod live_bridge;
 mod ui;
 mod updates;

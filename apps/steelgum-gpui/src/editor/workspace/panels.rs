@@ -54,6 +54,15 @@ impl ReviewWindow {
         let Some(id) = self.selected.as_deref() else {
             return note("Select an object to review its changes.").into_any_element();
         };
+        if !self
+            .project
+            .review
+            .changes()
+            .iter()
+            .any(|change| change.id == id)
+        {
+            return note("The selected object has no changes.").into_any_element();
+        }
         let (Some(before), Some(after)) = (
             self.project.review.before().object(id),
             self.project.review.after().object(id),
@@ -84,11 +93,7 @@ impl ReviewWindow {
     }
 
     pub(super) fn scene_objects(&self, tool: Tool, cx: &mut Context<Self>) -> AnyElement {
-        let scene = if self.before {
-            self.project.review.before()
-        } else {
-            self.project.review.after()
-        };
+        let scene = self.scene_revision();
         let title = if tool == Tool::Scene {
             "Scene objects"
         } else {
@@ -97,16 +102,48 @@ impl ReviewWindow {
         div()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(note(title))
-            .children(scene.objects().iter().map(|object| {
-                let detail = (tool == Tool::Assets).then(|| {
-                    let [x, y, z] = object.size;
-                    format!("{x} × {y} × {z}")
-                });
-                self.object_row(&object.id, detail, cx)
-            }))
+            .gap_1()
+            .child(div().px_2().pb_1().child(note(title)))
+            .when(scene.objects().is_empty(), |pane| {
+                pane.child(div().px_2().child(note("No objects in this revision.")))
+            })
+            .children(
+                scene
+                    .objects()
+                    .iter()
+                    .map(|object| self.object_row(&object.id, None, cx)),
+            )
             .into_any_element()
+    }
+
+    pub(super) fn asset_details(&self) -> AnyElement {
+        let selection = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.scene_revision().object(id));
+        div()
+            .flex_none()
+            .border_t_1()
+            .border_color(rgb(BORDER))
+            .px_3()
+            .py_2()
+            .when_some(selection, |pane, object| {
+                let [x, y, z] = object.size;
+                pane.child(div().truncate().text_sm().child(label(&object.id)))
+                    .child(note(format!("{x} × {y} × {z}")))
+            })
+            .when(selection.is_none(), |pane| {
+                pane.child(note("Select an object to see its dimensions."))
+            })
+            .into_any_element()
+    }
+
+    fn scene_revision(&self) -> &steelgum::Scene {
+        if self.before {
+            self.project.review.before()
+        } else {
+            self.project.review.after()
+        }
     }
 
     fn object_row(&self, id: &str, detail: Option<String>, cx: &mut Context<Self>) -> AnyElement {
@@ -117,18 +154,31 @@ impl ReviewWindow {
             .tab_index(0)
             .tab_stop(self.tool.is_some())
             .role(gpui::accesskit::Role::Button)
+            .aria_toggled(if active {
+                gpui::accesskit::Toggled::True
+            } else {
+                gpui::accesskit::Toggled::False
+            })
             .focus_visible(|style| style.border_color(rgb(ACCENT)))
             .border_1()
-            .border_color(rgb(PANEL))
+            .border_color(rgb(if active { ACCENT } else { PANEL }))
             .cursor_pointer()
             .rounded_md()
             .px_2()
-            .py_2()
+            .py_1()
             .flex()
             .flex_col()
             .bg(rgb(if active { SELECTED } else { PANEL }))
-            .hover(|style| style.bg(rgb(SELECTED)))
-            .child(div().text_sm().child(label(&id)))
+            .when(!active, |row| {
+                row.hover(|style| style.bg(rgb(super::TOOLBAR)))
+            })
+            .child(
+                div()
+                    .truncate()
+                    .text_sm()
+                    .text_color(rgb(if active { ACCENT } else { super::TEXT }))
+                    .child(label(&id)),
+            )
             .when_some(detail, |row, detail| row.child(note(detail)))
             .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
                 if view.focus && view.selected.as_ref() != Some(&id) {

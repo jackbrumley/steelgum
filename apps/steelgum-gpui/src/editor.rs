@@ -281,12 +281,63 @@ mod tests {
             })
         })?;
         let after = app.capture_screenshot(window.into())?;
+        app.update(|cx| {
+            window.update(cx, |view, _, cx| {
+                view.show_tool(Tool::Assets);
+                cx.notify();
+            })
+        })?;
+        let assets = app.capture_screenshot(window.into())?;
+        app.update_window(window.into(), |_, window, cx| {
+            let position = point(px(815.), px(161.));
+            window.dispatch_event(
+                PlatformInput::MouseMove(MouseMoveEvent {
+                    position,
+                    ..Default::default()
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                PlatformInput::MouseDown(MouseDownEvent {
+                    position,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                PlatformInput::MouseUp(MouseUpEvent {
+                    position,
+                    button: MouseButton::Left,
+                    click_count: 1,
+                    ..Default::default()
+                }),
+                cx,
+            );
+        })?;
+        let selected = app.capture_screenshot(window.into())?;
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                assert_eq!(view.selected.as_deref(), Some("floor"));
+            })
+        })?;
+        // Exclude the tools and scene chrome. Selection must change the scene image.
+        assert!(
+            (assets.height() / 5..assets.height() * 9 / 10).any(|y| {
+                (assets.width() / 4..assets.width() * 7 / 10)
+                    .any(|x| assets.get_pixel(x, y) != selected.get_pixel(x, y))
+            }),
+            "asset selection should move the viewport outline"
+        );
         app.update_window(window.into(), |_, window, cx| middle_drag(window, cx))?;
         let panned_3d = app.capture_screenshot(window.into())?;
-        assert_ne!(after, panned_3d, "middle drag should pan the 3D view");
+        assert_ne!(selected, panned_3d, "middle drag should pan the 3D view");
 
         app.update(|cx| {
             window.update(cx, |view, window, cx| {
+                view.show_tool(Tool::Changes);
+                view.selected = Some("plate".into());
                 view.before = true;
                 view.viewport.reset_pan();
                 window.refresh();
@@ -332,6 +383,7 @@ mod tests {
             std::fs::create_dir_all(&directory)?;
             before.save(directory.join("steelgum-gpui-before.png"))?;
             after.save(directory.join("steelgum-gpui-after.png"))?;
+            assets.save(directory.join("steelgum-gpui-assets.png"))?;
             top_down.save(directory.join("steelgum-gpui-top-down.png"))?;
         }
         let (blue_before, red_before) = count_plate_pixels(&before);

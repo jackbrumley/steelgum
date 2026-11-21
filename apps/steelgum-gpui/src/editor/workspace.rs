@@ -287,7 +287,7 @@ impl ReviewWindow {
                 )
                 .child(
                     div()
-                        .id("tool-pane-content")
+                        .id(tool.label())
                         .min_h_0()
                         .flex_1()
                         .overflow_y_scroll()
@@ -298,6 +298,9 @@ impl ReviewWindow {
                             Tool::Build => self.build(cx),
                         }),
                 )
+                .when(tool == Tool::Assets, |pane| {
+                    pane.child(self.asset_details())
+                })
             });
         slide("tool-pane", PANE_WIDTH, self.tool.is_some(), content)
     }
@@ -335,6 +338,7 @@ impl ReviewWindow {
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(title),
                     )
+                    .child(note(if self.before { "Before" } else { "After" }).flex_none())
                     .children([("3D", false), ("2D", true)].map(|(title, top_down)| {
                         action(title, title, top_down == self.top_down).on_click(cx.listener(
                             move |view, _, _, cx| {

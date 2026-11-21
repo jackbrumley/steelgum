@@ -40,7 +40,9 @@ Rust target and Windows build tools for the Windows experiment.
   open the first match.
 - **Changes** opens the right pane. Select **Pressure plate** and switch
   between **Before** and **After** to see the colour change. Use **Scene**
-  or **Assets** to browse objects in the selected revision.
+  or **Assets** to browse objects in the selected revision. Selecting an
+  object highlights its row and outlines it in the viewport. **Assets**
+  shows the selected object's dimensions below the list.
 - Left-drag to orbit in **3D**. Middle-drag to pan and scroll to zoom in
   either view. Choose **2D** for a top-down view. **Focus Object** isolates the selected object. Closing either
   sidebar gives the viewport more space. The FPS readout counts newly

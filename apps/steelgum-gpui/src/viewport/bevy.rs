@@ -11,6 +11,7 @@ use bevy::camera::{RenderTarget, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs as bevy_ecs;
 use bevy::input::InputPlugin;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
 use bevy::render::render_asset::RenderAssets;
@@ -41,10 +42,16 @@ struct Target(Handle<Image>);
 struct SceneMesh;
 
 #[derive(Component)]
+struct SelectionEdge;
+
+#[derive(Component)]
 struct ReviewCamera;
 
 #[derive(Resource)]
 struct Cube(Handle<Mesh>);
+
+#[derive(Resource)]
+struct OutlineMaterial(Handle<StandardMaterial>);
 
 #[derive(Clone, Copy, PartialEq)]
 struct Orbit {
@@ -117,6 +124,15 @@ impl Renderer {
             .add(Cuboid::new(1., 1., 1.));
         app.insert_resource(ClearColor(Color::srgb_u8(14, 22, 30)));
         app.insert_resource(Cube(cube));
+        let outline = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color: Color::srgb_u8(186, 181, 255),
+                unlit: true,
+                ..default()
+            });
+        app.insert_resource(OutlineMaterial(outline));
         app.world_mut().spawn((
             Camera3d::default(),
             RenderTarget::from(target.clone()),
@@ -165,17 +181,26 @@ impl Renderer {
         orbit: Orbit,
     ) -> Result<()> {
         let first_frame = self.displayed.is_none();
-        let changed = self.displayed.as_ref().is_none_or(|old| {
+        let scene_changed = self.displayed.as_ref().is_none_or(|old| {
             !Rc::ptr_eq(&view.review, &old.review)
                 || view.before != old.before
-                || view.selection != old.selection
                 || view.focus != old.focus
+                || (view.focus && view.selection != old.selection)
         });
+        let selection_changed = self
+            .displayed
+            .as_ref()
+            .is_some_and(|old| view.selection != old.selection);
         let projection_changed = self
             .displayed
             .as_ref()
             .is_some_and(|old| old.top_down != view.top_down);
-        if changed || projection_changed || size != self.size || self.orbit != orbit {
+        if scene_changed
+            || selection_changed
+            || projection_changed
+            || size != self.size
+            || self.orbit != orbit
+        {
             let world = self.apps.main.world_mut();
             if size != self.size {
                 let handle = world.resource::<Target>().0.clone();
@@ -186,8 +211,11 @@ impl Renderer {
                     .texture_descriptor
                     .size = extent(size);
             }
-            if changed {
+            if scene_changed {
                 rebuild_room(world, view);
+            }
+            if scene_changed || selection_changed {
+                update_outline(world, view);
             }
             update_camera(world, view, orbit, size);
             self.displayed = Some(view.clone());
@@ -287,6 +315,49 @@ fn rebuild_room(world: &mut World, view: &View) {
             Transform::from_translation(Vec3::from_array(object.center))
                 .with_scale(Vec3::from_array(object.size)),
         ));
+    }
+}
+
+fn update_outline(world: &mut World, view: &View) {
+    let previous = world
+        .query_filtered::<Entity, With<SelectionEdge>>()
+        .iter(world)
+        .collect::<Vec<_>>();
+    for entity in previous {
+        world.despawn(entity);
+    }
+    let Some(object) = view
+        .selection
+        .as_deref()
+        .and_then(|id| view.scene().object(id))
+    else {
+        return;
+    };
+    let mesh = world.resource::<Cube>().0.clone();
+    let material = world.resource::<OutlineMaterial>().0.clone();
+    let center = Vec3::from_array(object.center);
+    let thickness = 0.026;
+    let half_size = Vec3::from_array(object.size) * 0.5 + Vec3::splat(thickness);
+    // Depth-tested edges stay outside the object to preserve its authored color.
+    for axis in 0..3 {
+        let side = (axis + 1) % 3;
+        let end = (axis + 2) % 3;
+        let mut scale = Vec3::splat(thickness);
+        scale[axis] = 2. * half_size[axis] + thickness;
+        for side_sign in [-1., 1.] {
+            for end_sign in [-1., 1.] {
+                let mut position = center;
+                position[side] += side_sign * half_size[side];
+                position[end] += end_sign * half_size[end];
+                world.spawn((
+                    SelectionEdge,
+                    NotShadowCaster,
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(position).with_scale(scale),
+                ));
+            }
+        }
     }
 }
 

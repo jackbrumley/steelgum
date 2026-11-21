@@ -1,0 +1,33 @@
+[package]
+name = "steelgum-gpui"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99.1"
+publish = false
+
+[workspace]
+resolver = "3"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+anyhow = "1"
+gpui = { package = "bite-gpui", version = "=1.25.203", default-features = false, features = ["platform"] }
+steelgum = { path = "../../crates/steelgum" }
+
+[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+bevy = { version = "=0.20.1", default-features = false, features = [
+    "std", "multi_threaded", "bevy_log", "default_app", "3d_bevy_render",
+] }
+gpui_interop = { version = "=0.2.1", features = ["gpui", "wgpu"] }
+gpui_wgpu = { package = "bite-gp-wgpu", version = "=1.25.203" }
+wgpu = "=30.0.1"
+
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+gpui = { package = "bite-gpui", version = "=1.25.203", default-features = false, features = ["test-support"] }
+gpui_wgpu = { package = "bite-gp-wgpu", version = "=1.25.203", features = ["headless"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

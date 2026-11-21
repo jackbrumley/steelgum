@@ -1,5 +1,7 @@
 //! Steelgum's authored scene data and validation.
 
+pub mod review;
+
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};

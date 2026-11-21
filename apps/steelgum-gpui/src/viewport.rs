@@ -3,6 +3,8 @@
 use std::rc::Rc;
 
 use gpui::AnyElement;
+
+pub(crate) type PendingScreenshot = Box<dyn FnOnce() -> anyhow::Result<Vec<u8>> + Send>;
 #[cfg(not(any(target_os = "linux", windows)))]
 use gpui::{IntoElement as _, div, prelude::*, rgb};
 use steelgum::{Scene, review::SceneReview};
@@ -36,6 +38,18 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
+    pub fn capture(&self, expected: &View) -> anyhow::Result<PendingScreenshot> {
+        #[cfg(any(target_os = "linux", windows))]
+        {
+            self.surface.capture(expected)
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            let _ = expected;
+            anyhow::bail!("Viewport screenshots are available on Linux and Windows.")
+        }
+    }
+
     pub fn rendered_frames(&self) -> u64 {
         #[cfg(any(target_os = "linux", windows))]
         {

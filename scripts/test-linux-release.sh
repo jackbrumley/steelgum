@@ -23,15 +23,27 @@ check_version() {
     fi
 }
 
+check_updater() {
+    "$1" --check-updates | python3 -c '
+import json, sys
+status = json.load(sys.stdin)
+if status["currentVersion"] != sys.argv[1]:
+    raise SystemExit(f"Expected updater version {sys.argv[1]}, got {status}")
+' "$VERSION"
+}
+
 bash docs/install.sh --appimage "${args[@]}"
 bash docs/install.sh --appimage "${args[@]}"
 check_version "$user_binary"
+check_updater "$user_binary"
 test -f "$launcher"
 test -f "$icon"
 
 # Default install should choose the native format and leave a single launcher.
 bash docs/install.sh "${args[@]}"
 check_version /usr/bin/steelgum
+check_version /usr/bin/steelgum-player
+check_updater /usr/bin/steelgum
 for path in "$user_binary" "$launcher" "$icon"; do
     test ! -e "$path"
 done
@@ -47,5 +59,6 @@ bash docs/install.sh --system "${args[@]}"
 check_version /usr/bin/steelgum
 bash docs/uninstall.sh --yes
 test ! -e /usr/bin/steelgum
+test ! -e /usr/bin/steelgum-player
 test ! -e /usr/share/applications/info.brumley.steelgum.desktop
 test "$(cat -- "$config/settings-fixture")" = 'persistent settings'

@@ -6,18 +6,23 @@ try {
     $version = node scripts/release-assets.mjs version
     $asset = node scripts/release-assets.mjs asset windows
     $outputBase = [IO.Path]::GetFileNameWithoutExtension($asset)
-    $manifest = node scripts/release-assets.mjs desktop-manifest
-    $target = Join-Path (Split-Path $manifest) 'target'
-    $lockArgs = @()
-    if (Test-Path (Join-Path (Split-Path $manifest) 'Cargo.lock')) {
-        $lockArgs = @('--locked')
+    function Build-SteelgumBinary([string]$Manifest, [string]$Name) {
+        $target = Join-Path (Split-Path $Manifest) 'target'
+        $lockArgs = @()
+        if (Test-Path (Join-Path (Split-Path $Manifest) 'Cargo.lock')) {
+            $lockArgs = @('--locked')
+        }
+        cargo build --release --manifest-path $Manifest --target-dir $target --bin $Name @lockArgs | Out-Host
+        return (Resolve-Path (Join-Path $target "release/$Name.exe")).Path
     }
-    cargo build --release --manifest-path $manifest --target-dir $target --bin steelgum @lockArgs
 
-    $binary = (Resolve-Path (Join-Path $target 'release/steelgum.exe')).Path
-    $actual = & $binary --version
-    if ($actual -cne "steelgum $version") {
-        throw "Expected steelgum $version, got $actual."
+    $binary = Build-SteelgumBinary (node scripts/release-assets.mjs desktop-manifest) steelgum-gpui
+    $player = Build-SteelgumBinary (node scripts/release-assets.mjs player-manifest) steelgum
+    foreach ($program in @($binary, $player)) {
+        $actual = & $program --version
+        if ($actual -cne "steelgum $version") {
+            throw "Expected steelgum $version, got $actual from $program."
+        }
     }
 
     $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
@@ -29,7 +34,7 @@ try {
     try {
         $icon = Join-Path $workDirectory 'steelgum.ico'
         magick -background none docs/assets/steelgum.svg -define icon:auto-resize=128,64,48,32,16 $icon
-        & $compiler "/DSteelgumVersion=$version" "/DOutputBase=$outputBase" "/DSteelgumIcon=$icon" "/DSteelgumBinary=$binary" packaging/windows/steelgum.iss
+        & $compiler "/DSteelgumVersion=$version" "/DOutputBase=$outputBase" "/DSteelgumIcon=$icon" "/DSteelgumBinary=$binary" "/DSteelgumPlayer=$player" packaging/windows/steelgum.iss
         if (-not (Test-Path "release-artifacts/$asset" -PathType Leaf)) {
             throw "Setup did not create $asset."
         }

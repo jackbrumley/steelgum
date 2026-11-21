@@ -5,7 +5,10 @@ use gpui::{
 };
 
 mod panels;
+mod tool;
+
 use crate::viewport::View;
+pub(super) use tool::Tool;
 
 pub(super) const SHELL: u32 = 0x15181f;
 const TOOLBAR: u32 = 0x20242e;
@@ -19,35 +22,19 @@ const ERROR: u32 = 0xffb5b4;
 const MENU_WIDTH: f32 = 182.;
 const PANE_WIDTH: f32 = 258.;
 
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum Tool {
-    Objects,
-    Changes,
-    Build,
-}
-
-impl Tool {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Objects => "Objects",
-            Self::Changes => "Changes",
-            Self::Build => "Build Game",
-        }
-    }
-
-    fn icon(self) -> &'static str {
-        match self {
-            Self::Objects => "◇",
-            Self::Changes => "⑂",
-            Self::Build => "⚒",
-        }
-    }
-}
-
 impl ReviewWindow {
     pub(super) fn show_tool(&mut self, tool: Tool) {
         self.tool = Some(tool);
         self.closing_pane = None;
+        self.reveal_selected_object();
+    }
+
+    fn activate_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
+        self.show_tool(tool);
+        if tool == Tool::Assets {
+            self.refresh_assets(cx);
+        }
+        cx.notify();
     }
 
     fn select_from_viewport(&mut self, id: String, cx: &mut Context<Self>) {
@@ -60,32 +47,25 @@ impl ReviewWindow {
         if self.tool != Some(Tool::Changes) || !changed {
             self.show_tool(Tool::Objects);
         }
-        if self.tool == Some(Tool::Objects)
-            && let Some(index) = self
-                .scene_revision()
-                .objects()
-                .iter()
-                .position(|object| object.id == id)
-        {
-            self.objects_scroll.scroll_to_item(index);
-        }
         self.select_object(id, cx);
     }
 
-    fn select_object(&mut self, id: String, cx: &mut Context<Self>) {
+    pub(super) fn select_object(&mut self, id: String, cx: &mut Context<Self>) {
         if self.selected.as_ref() != Some(&id) {
             if self.focus {
                 self.viewport.reset_pan();
             }
             self.selected = Some(id);
+            self.rename = None;
             self.review_draft = Default::default();
         }
+        self.reveal_selected_object();
         cx.notify();
     }
 
     fn matching_tools(&self) -> impl Iterator<Item = Tool> + '_ {
         let query = self.search.trim().to_lowercase();
-        [Tool::Objects, Tool::Changes, Tool::Build]
+        [Tool::Objects, Tool::Assets, Tool::Changes, Tool::Build]
             .into_iter()
             .filter(move |tool| tool.label().to_lowercase().contains(&query))
     }
@@ -97,7 +77,12 @@ impl ReviewWindow {
     }
 
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.handle_review_key(event, window, cx) {
+        if event.keystroke.key == "f6" {
+            crate::updates::check(window, cx, true);
+            cx.stop_propagation();
+            return;
+        }
+        if self.handle_object_key(event, window, cx) || self.handle_review_key(event, window, cx) {
             cx.stop_propagation();
             return;
         }
@@ -113,7 +98,7 @@ impl ReviewWindow {
                 "enter" => {
                     let first = self.matching_tools().next();
                     if let Some(tool) = first {
-                        self.show_tool(tool);
+                        self.activate_tool(tool, cx);
                         self.workspace_focus.focus(window, cx);
                     }
                 }
@@ -139,6 +124,7 @@ impl ReviewWindow {
     }
 
     fn toolbar(&self, cx: &mut Context<Self>) -> Div {
+        let playing = matches!(self.run_state, RunState::Running(Job::Play));
         bar()
             .h(px(56.))
             .child(
@@ -192,11 +178,17 @@ impl ReviewWindow {
                 ),
             )
             .child(
-                control("play", "▶  Play", false)
+                control("play", if playing { "■  Stop" } else { "▶  Play" }, playing)
                     .bg(rgb(ACCENT))
                     .text_color(rgb(0x24203c))
                     .hover(|style| style.bg(rgb(0xd3ceff)))
-                    .on_click(cx.listener(|view, _, _, cx| view.run_game(Job::Play, cx))),
+                    .on_click(cx.listener(move |view, _, _, cx| {
+                        if playing {
+                            view.cancel_job(cx);
+                        } else {
+                            view.run_game(Job::Play, cx);
+                        }
+                    })),
             )
     }
 
@@ -280,8 +272,7 @@ impl ReviewWindow {
                 .tab_stop(self.menu_open)
                 .on_click(cx.listener(move |view, _, _, cx| {
                     if view.menu_open {
-                        view.show_tool(tool);
-                        cx.notify();
+                        view.activate_tool(tool, cx);
                     }
                 }))
             }));
@@ -331,6 +322,7 @@ impl ReviewWindow {
                 )
                 .child(match tool {
                     Tool::Objects => self.scene_objects(cx),
+                    Tool::Assets => scroll(self.assets_panel(cx)),
                     Tool::Changes => scroll(self.changes(cx)),
                     Tool::Build => scroll(self.build(cx)),
                 })
@@ -500,7 +492,7 @@ impl Render for ReviewWindow {
             .when(self.tool != Some(Tool::Build), |app| {
                 app.when_some(self.run_state.message(), |app, status| {
                     app.child(status_line(
-                        status,
+                        self.job_progress.as_deref().unwrap_or(status),
                         matches!(self.run_state, RunState::Finished(Err(_))),
                     ))
                 })

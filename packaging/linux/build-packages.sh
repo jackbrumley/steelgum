@@ -15,14 +15,18 @@ app_dir="$work_dir/Steelgum.AppDir"
 app_id=info.brumley.steelgum
 output_dir="$root/release-artifacts"
 
-manifest=$(node scripts/release-assets.mjs desktop-manifest)
-target_dir="${manifest%/*}/target"
-lock_args=()
-if [[ -f "${manifest%.toml}.lock" ]]; then
-    lock_args=(--locked)
-fi
-cargo build --release --manifest-path "$manifest" --target-dir "$target_dir" --bin steelgum "${lock_args[@]}"
-install -Dm755 "$target_dir/release/steelgum" "$stage/usr/bin/steelgum"
+build_binary() {
+    local manifest=$1 name=$2 installed_name=$3 target_dir
+    local -a lock_args=()
+    target_dir="${manifest%/*}/target"
+    if [[ -f "${manifest%.toml}.lock" ]]; then
+        lock_args=(--locked)
+    fi
+    cargo build --release --manifest-path "$manifest" --target-dir "$target_dir" --bin "$name" "${lock_args[@]}"
+    install -Dm755 "$target_dir/release/$name" "$stage/usr/bin/$installed_name"
+}
+build_binary "$(node scripts/release-assets.mjs desktop-manifest)" steelgum-gpui steelgum
+build_binary "$(node scripts/release-assets.mjs player-manifest)" steelgum steelgum-player
 install -Dm644 "packaging/linux/$app_id.desktop" "$stage/usr/share/applications/$app_id.desktop"
 install -Dm644 docs/assets/steelgum.svg "$stage/usr/share/icons/hicolor/scalable/apps/$app_id.svg"
 desktop-file-validate "$stage/usr/share/applications/$app_id.desktop"
@@ -36,6 +40,7 @@ check_version() {
     fi
 }
 check_version "$stage/usr/bin/steelgum" --version
+check_version "$stage/usr/bin/steelgum-player" --version
 mkdir -p -- "$output_dir"
 
 # Bevy's window and graphics backends load some libraries at runtime. The
@@ -48,9 +53,10 @@ Package: steelgum
 Version: $version
 Architecture: amd64
 Maintainer: Jack Brumley <82296582+jackbrumley@users.noreply.github.com>
-Depends: libc6 (>= 2.35), libgcc-s1, libwayland-client0, libwayland-cursor0,
+Depends: libc6 (>= 2.35), libgcc-s1, libxcb1, libfreetype6, libfontconfig1,
+ libwayland-client0, libwayland-cursor0,
  libxkbcommon0, libxkbcommon-x11-0, libx11-6, libx11-xcb1, libxcursor1,
- libxi6, libxrandr2, libvulkan1, libegl1, curl, python3, procps, util-linux
+ libxi6, libxrandr2, libvulkan1, libegl1, curl, git, python3, procps, util-linux
 Section: devel
 Priority: optional
 Homepage: https://brumley.info/steelgum/
@@ -69,10 +75,11 @@ Summary: Build and preview Steelgum games
 License: All rights reserved
 URL: https://brumley.info/steelgum/
 Requires: libwayland-client.so.0()(64bit), libwayland-cursor.so.0()(64bit)
+Requires: libxcb.so.1()(64bit), libfreetype.so.6()(64bit), libfontconfig.so.1()(64bit)
 Requires: libxkbcommon.so.0()(64bit), libxkbcommon-x11.so.0()(64bit)
 Requires: libX11.so.6()(64bit), libX11-xcb.so.1()(64bit), libXcursor.so.1()(64bit)
 Requires: libXi.so.6()(64bit), libXrandr.so.2()(64bit), libvulkan.so.1()(64bit), libEGL.so.1()(64bit)
-Requires: /usr/bin/curl, /usr/bin/python3, /usr/bin/pgrep, /usr/bin/setsid, /usr/bin/flock
+Requires: /usr/bin/curl, /usr/bin/git, /usr/bin/python3, /usr/bin/pgrep, /usr/bin/setsid, /usr/bin/flock
 %global debug_package %{nil}
 %global __os_install_post %{nil}
 
@@ -85,6 +92,7 @@ cp -a "$stage/." %{buildroot}/
 
 %files
 /usr/bin/steelgum
+/usr/bin/steelgum-player
 /usr/share/applications/$app_id.desktop
 /usr/share/icons/hicolor/scalable/apps/$app_id.svg
 EOF

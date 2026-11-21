@@ -99,11 +99,19 @@ fn main() -> AppExit {
 
     match mode {
         Mode::Help => {
-            println!("Usage: steelgum [--scene PATH.json] [--capture PATH.png]");
-            println!("       steelgum --check-updates | --version | --help");
+            let bundled = is_bundled_player();
+            let name = if bundled {
+                "steelgum-player"
+            } else {
+                "steelgum"
+            };
+            println!("Usage: {name} [--scene PATH.json] [--capture PATH.png]");
+            println!("       {name} --version | --help");
             println!("Move with WASD or arrow keys. Press R to restart or Esc to quit.");
             println!("Capture runs the scripted playthrough and saves its final view.");
-            println!("Press F6 to check for updates.");
+            if !bundled {
+                println!("Press F6 or run {name} --check-updates to check for updates.");
+            }
             AppExit::Success
         }
         Mode::Version => {
@@ -188,14 +196,23 @@ fn run(scene_path: Option<&Path>, capture_path: Option<PathBuf>, auto_check: boo
             .add_systems(PostUpdate, capture::request);
     } else {
         app.add_plugins(plugins)
-            .insert_non_send(updates::Updates::new(auto_check))
-            .add_systems(Startup, updates::startup)
-            .add_systems(Update, updates::poll)
             .insert_resource(Time::<Fixed>::from_duration(STEP))
             .add_systems(FixedUpdate, step_game)
             .add_systems(Update, handle_controls.before(sync_scene));
+        if !is_bundled_player() {
+            app.insert_non_send(updates::Updates::new(auto_check))
+                .add_systems(Startup, updates::startup)
+                .add_systems(Update, updates::poll);
+        }
     }
     app.run()
+}
+
+fn is_bundled_player() -> bool {
+    std::env::current_exe().is_ok_and(|exe| {
+        exe.file_stem()
+            .is_some_and(|name| name.eq_ignore_ascii_case("steelgum-player"))
+    })
 }
 
 fn setup_scene(
@@ -293,10 +310,11 @@ fn sync_scene(
         } else {
             "WASD or arrows to move. Step on the plate"
         };
-        let update_status = updates
-            .as_ref()
-            .map_or("F6 Updates", |value| value.window_status());
-        let title = format!("{TITLE} | {guidance} | {update_status}");
+        let mut title = format!("{TITLE} | {guidance}");
+        if let Some(updates) = updates.as_ref() {
+            title.push_str(" | ");
+            title.push_str(updates.window_status());
+        }
         if window.title != title {
             window.title = title;
         }

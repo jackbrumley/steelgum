@@ -1,7 +1,8 @@
 # Steelgum desktop review experiment
 
-This source-only GPUI workspace opens directly into the Door Room example.
-The packaged Steelgum application has its own executable and release process.
+The native Steelgum workspace opens a project, previews its scenes, and
+reviews authored changes against Git. Source development and packaged
+installs share the workspace. Packaged installs include the Door Game player.
 
 From the Steelgum checkout, enter this directory and run:
 
@@ -28,8 +29,9 @@ one lower-priority job. The desktop window itself uses the normal CPU
 settings. To leave more room for other apps, run `STEELGUM_BUILD_CPUS=2
 cargo dev`. On Windows the watcher limits Cargo jobs to half the available
 logical CPUs.
-To reopen the same project after each restart, pass the worktree and scene
-path to the watcher:
+To open a project on launch, pass its worktree to the watcher. An optional
+second argument selects a scene. Launching without arguments reopens the
+last project.
 
 ```sh
 cargo dev /path/to/worktree scenes/room.json
@@ -53,30 +55,38 @@ missing on Linux Mint, Ubuntu, or Debian, install the development package:
 sudo apt install libxkbcommon-x11-dev
 ```
 
+## Open and review a game
+
 - Use the top-left menu button to collapse the tools. **Ctrl+K** opens and
   focuses **Find a tool**. Type part of a tool name and press **Enter** to
   open the first match.
 - **Changes** opens the right pane. Select **Pressure plate** and switch
   between **Before** and **After** to see the colour change. **Objects**
   lists the selected revision's objects and shows the selection's dimensions.
-  Click a row or the object in the viewport to select it. The selection
-  stays in place when changing revisions.
+  Click a row or viewport object to select it. Use Up, Down, Home, and End in
+  the focused list. Press F2 in After, or choose Rename, to edit its display
+  name. Enter saves, and Escape cancels. Saves preserve the stable object ID
+  and reject changes when the scene on disk differs from the loaded copy.
 - Use **Flag for Review** on the selection, add an optional note, then
   choose **Copy review request**. The clipboard text includes the scene
   path, stable object ID, exact Git base for a worktree, and changed object
-  properties.
+  properties. Select **Include viewport screenshot** to attach the path to
+  a captured PNG. **Assets** browses files under the project asset directory
+  and previews PNG and JPEG images.
 - Left-drag to orbit in **3D**. Middle-drag to pan and scroll to zoom in
   either view. Choose **2D** for a top-down view. **Focus Object** isolates the selected object. Closing either
   sidebar gives the viewport more space. The FPS readout counts newly
   rendered scene frames. It shows **FPS idle** while the viewport is still.
 - **Build Game** opens the build pane. Choose **Debug** or **Release** and
-  click **Build** to compile for the host. **Play** uses the selected profile
-  and opens a separate game window. The bundled example plays the **After**
-  scene. An open Door Game worktree plays the saved scene on disk.
+  click **Build**. The build displays Cargo diagnostics and supports **Cancel
+  Build**. **Play** builds the project and starts its game window. The toolbar
+  changes to **Stop** while the play session is active. Linux builds share the
+  development watcher's CPU budget. The bundled example plays without Cargo.
+- Press **F6** in the installed workspace to check for updates.
 
-**Open Folder** accepts a Git worktree with `scenes/room.json` or the
-Door Game room in this repository. You can also pass another scene's path
-relative to the Git worktree root:
+**Open Folder** accepts a Git worktree with a `steelgum.json` manifest.
+Legacy Door Game worktrees and worktrees with `scenes/room.json` can also
+be opened. You can pass a scene path relative to the worktree:
 
 ```sh
 cargo run --locked -- /path/to/worktree scenes/level.json
@@ -88,10 +98,44 @@ An invalid or temporarily missing scene leaves the last valid scene visible
 with an error. The next valid save clears the error. **Refresh** is also
 available to request a fresh read.
 
-Build and Play currently use `apps/door-game-bevy/Cargo.toml` in the
-Steelgum checkout or opened worktree. Other supported worktrees can still be
-opened for review. Build and Play execute the runner's Cargo project, so use
-them with worktrees you trust.
+## Project manifest
+
+Place `steelgum.json` in the game repository root:
+
+```json
+{
+  "version": 1,
+  "name": "Signal Room",
+  "scene": "scenes/control-room.json",
+  "assets": "assets",
+  "runner": { "manifest": "Cargo.toml", "binary": "signal-room" }
+}
+```
+
+Scene, asset, and runner paths are relative to the Git worktree. Commit a
+baseline scene before opening it. The runner is optional for review-only
+projects. When present, Steelgum builds the selected Cargo binary and
+launches it from the worktree with `--scene` and the saved scene path.
+Build and Play run the project's code and require a compatible Rust
+toolchain. Use them with worktrees you trust. Reopen the folder after editing
+its manifest.
+
+## Agent commands
+
+The installed `steelgum` executable provides a local JSON interface for
+coding agents. These commands open the same comparison used by the
+workspace and do not require a graphical session.
+
+```sh
+steelgum --agent inspect /path/to/game
+steelgum --agent select /path/to/game --object beacon
+steelgum --agent review /path/to/game --object beacon --note "Check the beacon visibility"
+```
+
+Use `--before` to inspect the Git base or `--scene` to choose another
+worktree-relative scene. The response includes a protocol version, Git base,
+and selected scene. Agents can make changes in the worktree and see them
+appear live in the open workspace.
 
 Steelgum owns the comparison and stable authored IDs. GPUI controls the
 window and passes camera input to the viewport. Bevy draws offscreen on

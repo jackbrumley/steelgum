@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "Door Game",
+  "scene": "examples/door-game/scenes/room.json",
+  "runner": {
+    "manifest": "apps/door-game-bevy/Cargo.toml",
+    "binary": "steelgum"
+  }
+}

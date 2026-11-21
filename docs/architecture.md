@@ -87,3 +87,20 @@ The workspace watches the open scene file and Git HEAD, coalesces saves,
 and replaces the comparison after both revisions validate. Failed reads
 leave the last valid comparison in place. Refresh uses the same validation
 path. Worktree changes leave build and play under explicit user control.
+
+## Project workspace
+
+The versioned `steelgum.json` manifest locates the starting scene, optional
+assets, and a Cargo binary for the game. Desktop and agent commands use the
+same manifest discovery and Git comparison. The agent JSON interface
+inspects projects, resolves selected objects by stable ID, and formats review
+requests.
+
+Scene names are optional display labels. Renaming uses the loaded worktree
+bytes to detect stale edits and writes a validated scene atomically. IDs
+remain the keys referenced by gameplay and Git comparison. Assets are files
+under a separate project directory and are previewed by the workspace.
+
+The installed workspace launches a sibling player for its bundled example.
+Project builds use the shared Cargo CPU budget, and play sessions launch the
+built binary with the saved scene.

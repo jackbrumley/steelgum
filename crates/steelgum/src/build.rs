@@ -1,7 +1,8 @@
 use std::error::Error;
+use std::ffi::OsStr;
 use std::process::Command;
 
-pub(super) fn build_command() -> Result<Command, Box<dyn Error>> {
+pub fn build_command(cargo: &OsStr) -> Result<Command, Box<dyn Error>> {
     let available = std::thread::available_parallelism()?.get();
     let maximum = (available / 2).max(1);
     let jobs = match std::env::var("STEELGUM_BUILD_CPUS") {
@@ -13,13 +14,17 @@ pub(super) fn build_command() -> Result<Command, Box<dyn Error>> {
         Err(std::env::VarError::NotPresent) => maximum,
         Err(error) => return Err(error.into()),
     };
-    let mut command = restricted_cargo(jobs, available)?;
+    let mut command = restricted_cargo(cargo, jobs, available)?;
     command.args(["build", "--jobs", &jobs.to_string()]);
     Ok(command)
 }
 
 #[cfg(target_os = "linux")]
-fn restricted_cargo(jobs: usize, available: usize) -> Result<Command, Box<dyn Error>> {
+fn restricted_cargo(
+    cargo: &OsStr,
+    jobs: usize,
+    available: usize,
+) -> Result<Command, Box<dyn Error>> {
     let status = std::fs::read_to_string("/proc/self/status")?;
     let allowed = status
         .lines()
@@ -27,7 +32,9 @@ fn restricted_cargo(jobs: usize, available: usize) -> Result<Command, Box<dyn Er
         .ok_or("Linux did not report the build process's allowed CPUs")?;
     let cpus = cpu_list(allowed.trim(), jobs)?;
     let mut command = Command::new("taskset");
-    command.args(["--cpu-list", &cpus, "nice", "-n", "10", "cargo"]);
+    command
+        .args(["--cpu-list", &cpus, "nice", "-n", "10"])
+        .arg(cargo);
     if available == 1 {
         println!("Desktop build: one logical CPU available, using one job at lower priority.");
     } else {
@@ -37,9 +44,13 @@ fn restricted_cargo(jobs: usize, available: usize) -> Result<Command, Box<dyn Er
 }
 
 #[cfg(not(target_os = "linux"))]
-fn restricted_cargo(jobs: usize, available: usize) -> Result<Command, Box<dyn Error>> {
+fn restricted_cargo(
+    cargo: &OsStr,
+    jobs: usize,
+    available: usize,
+) -> Result<Command, Box<dyn Error>> {
     println!("Desktop build: {jobs} Cargo jobs for {available} logical CPUs.");
-    Ok(Command::new("cargo"))
+    Ok(Command::new(cargo))
 }
 
 #[cfg(target_os = "linux")]

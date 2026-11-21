@@ -2,12 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-import { DESKTOP_MANIFEST, EXPECTED_ASSETS, INSTALL_SITE, REPOSITORY, TAG, VERSION, releaseDownloads, verifyPrerelease } from './release-assets.mjs';
+import { DESKTOP_MANIFEST, EXPECTED_ASSETS, INSTALL_SITE, PLAYER_MANIFEST, REPOSITORY, TAG, VERSION, releaseDownloads, verifyPrerelease } from './release-assets.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const DEV = 'dev';
 const WORKFLOW = '.github/workflows/release.yml';
-const FILES = ['Cargo.toml', DESKTOP_MANIFEST, 'Cargo.lock', DESKTOP_MANIFEST.replace(/\.toml$/, '.lock')];
+const MANIFESTS = ['Cargo.toml', DESKTOP_MANIFEST, PLAYER_MANIFEST];
+const LOCKFILES = MANIFESTS.map((manifest) => manifest.replace(/\.toml$/, '.lock'));
+const FILES = [...MANIFESTS, ...LOCKFILES];
 const PLAIN_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/;
 const CARGO_VERSION = /^(version = ")[^"]+(")$/gm;
 
@@ -86,7 +88,7 @@ function prepare(next) {
     const file = new URL(name, ROOT);
     return existsSync(file) ? readFileSync(file) : null;
   });
-  const changes = snapshot.slice(0, 2).map((bytes, index) => {
+  const changes = snapshot.slice(0, MANIFESTS.length).map((bytes, index) => {
     const content = bytes?.toString('utf8') ?? '';
     const matches = [...content.matchAll(CARGO_VERSION)];
     if (matches.length !== 1 || matches[0][0] !== `version = "${VERSION}"`) {
@@ -101,10 +103,10 @@ function prepare(next) {
     for (const [index, content] of changes.entries()) {
       writeFileSync(new URL(FILES[index], ROOT), content);
     }
-    for (const manifest of FILES.slice(0, 2)) {
+    for (const manifest of MANIFESTS) {
       run('cargo', ['+1.99.1', 'update', '--workspace', '--manifest-path', manifest]);
     }
-    for (const lockfile of FILES.slice(2)) {
+    for (const lockfile of LOCKFILES) {
       if (!existsSync(new URL(lockfile, ROOT))) throw new Error(`Cargo did not write ${lockfile}.`);
     }
     staged = true;

@@ -30,9 +30,10 @@ use gpui_interop::{
 };
 use gpui_wgpu::{ImportedTextureExt as _, WgpuRenderer};
 
-use super::View;
+use super::{PendingScreenshot, View};
 
 mod camera;
+mod screenshot;
 use camera::{Orbit, pick_object, update_camera};
 
 #[derive(Clone, Copy)]
@@ -72,6 +73,8 @@ struct OutlineMaterial(Handle<StandardMaterial>);
 
 struct Renderer {
     apps: SubApps,
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     frame: RenderedFrame,
     size: [u32; 2],
     displayed: Option<View>,
@@ -112,7 +115,8 @@ impl Renderer {
             wgpu::TextureFormat::Rgba8UnormSrgb,
             RenderAssetUsages::RENDER_WORLD,
         );
-        image.texture_descriptor.usage |= wgpu::TextureUsages::RENDER_ATTACHMENT;
+        image.texture_descriptor.usage |=
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC;
         let target = app.world_mut().resource_mut::<Assets<Image>>().add(image);
         let cube = app
             .world_mut()
@@ -161,6 +165,8 @@ impl Renderer {
         let apps = std::mem::take(app.sub_apps_mut());
         Ok(Self {
             apps,
+            device,
+            queue,
             frame,
             size,
             displayed: None,
@@ -366,6 +372,36 @@ pub(super) struct Surface {
 }
 
 impl Surface {
+    pub fn capture(&self, expected: &View) -> Result<PendingScreenshot> {
+        let renderer = self.renderer.borrow();
+        let renderer = renderer
+            .as_ref()
+            .ok_or_else(|| anyhow!("The viewport has not rendered yet."))?;
+        let displayed = renderer
+            .displayed
+            .as_ref()
+            .ok_or_else(|| anyhow!("No scene has been drawn yet."))?;
+        anyhow::ensure!(
+            Rc::ptr_eq(&displayed.review, &expected.review)
+                && displayed.before == expected.before
+                && displayed.selection == expected.selection
+                && displayed.focus == expected.focus
+                && displayed.top_down == expected.top_down,
+            "The viewport is changing. Try copying after the scene appears."
+        );
+        let view = renderer
+            .frame
+            .0
+            .lock()
+            .map_err(|_| anyhow!("Could not read the rendered viewport."))?;
+        let texture = view
+            .as_ref()
+            .ok_or_else(|| anyhow!("No scene image is ready yet."))?
+            .texture();
+        let capture = screenshot::Readback::start(&renderer.device, &renderer.queue, texture)?;
+        Ok(Box::new(move || capture.png()))
+    }
+
     pub fn rendered_frames(&self) -> u64 {
         self.renderer
             .borrow()

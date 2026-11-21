@@ -11,11 +11,9 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-mod cpu;
-
 const APP_NAME: &str = "steelgum-gpui";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
-const USAGE: &str = "Usage: cargo dev [--build-only | WORKTREE SCENE_PATH_RELATIVE_TO_WORKTREE]";
+const USAGE: &str = "Usage: cargo dev [--build-only | WORKTREE [SCENE_PATH_RELATIVE_TO_WORKTREE]]";
 
 type Snapshot = BTreeMap<PathBuf, (SystemTime, u64)>;
 
@@ -28,7 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("{USAGE}");
             return Ok(());
         }
-        [worktree, _] => {
+        [worktree] | [worktree, _] => {
             *worktree = std::path::absolute(Path::new(worktree))?.into_os_string();
             false
         }
@@ -135,7 +133,7 @@ fn collect_files(path: PathBuf, files: &mut Snapshot) -> io::Result<()> {
 }
 
 fn build(app: &Path) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
-    let output = cpu::build_command()?
+    let output = steelgum::build::build_command(std::ffi::OsStr::new("cargo"))?
         .current_dir(app)
         // Let the app's rust-toolchain.toml select its own toolchain.
         .env_remove("RUSTUP_TOOLCHAIN")

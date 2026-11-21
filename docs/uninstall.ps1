@@ -9,6 +9,7 @@ $debugDir = Join-Path $env:USERPROFILE '.config\steelgum\debug'
 $logFile = Join-Path $debugDir 'update.log'
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\Steelgum'
 $installedExe = Join-Path $installDir 'steelgum.exe'
+$installedPlayerExe = Join-Path $installDir 'steelgum-player.exe'
 $registryKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{CA30D8B3-ACB0-4951-B503-2F91D6DD3BD4}_is1'
 $lock = $null
 $failed = $false
@@ -39,9 +40,9 @@ try {
     ) {
       throw 'The registered uninstaller is outside the Steelgum install location.'
     }
-    foreach ($process in @(Get-Process -Name 'steelgum' -ErrorAction SilentlyContinue)) {
+    foreach ($process in @(Get-Process -Name 'steelgum', 'steelgum-player' -ErrorAction SilentlyContinue)) {
       try {
-        if (-not $process.HasExited -and $process.Path -ieq $installedExe) {
+        if (-not $process.HasExited -and @($installedExe, $installedPlayerExe) -icontains $process.Path) {
           if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) {
             throw 'Close the installed Steelgum window and try again.'
           }

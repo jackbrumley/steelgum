@@ -3,7 +3,8 @@ import { pathToFileURL } from 'node:url';
 
 export const REPOSITORY = 'jackbrumley/steelgum';
 export const INSTALL_SITE = 'https://brumley.info/steelgum/';
-export const DESKTOP_MANIFEST = 'apps/door-game-bevy/Cargo.toml';
+export const DESKTOP_MANIFEST = 'apps/steelgum-gpui/Cargo.toml';
+export const PLAYER_MANIFEST = 'apps/door-game-bevy/Cargo.toml';
 
 const manifest = readFileSync(new URL(`../${DESKTOP_MANIFEST}`, import.meta.url), 'utf8');
 const packageSection = manifest.match(/^\[package\]\r?\n([\s\S]+?)(?=^\[|(?![\s\S]))/m)?.[1];
@@ -76,12 +77,13 @@ function run(args) {
     if (command === 'tag' && !value) return console.log(TAG);
     if (command === 'repo' && !value) return console.log(REPOSITORY);
     if (command === 'desktop-manifest' && !value) return console.log(DESKTOP_MANIFEST);
+    if (command === 'player-manifest' && !value) return console.log(PLAYER_MANIFEST);
     if (command === 'assets' && !value) return console.log(EXPECTED_ASSETS.join('\n'));
     if (command === 'asset' && Object.hasOwn(ASSET_NAMES, value)) return console.log(ASSET_NAMES[value]);
     if (command === 'notes' && !value) return process.stdout.write(releaseNotes());
     if (command === 'verify' && value) return verifyPrerelease(JSON.parse(readFileSync(value, 'utf8')));
   }
-  throw new Error('Usage: node scripts/release-assets.mjs version|tag|repo|desktop-manifest|assets|asset <deb|rpm|linux|windows>|notes|verify path');
+  throw new Error('Usage: node scripts/release-assets.mjs version|tag|repo|desktop-manifest|player-manifest|assets|asset <deb|rpm|linux|windows>|notes|verify path');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

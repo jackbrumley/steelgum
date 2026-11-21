@@ -1,6 +1,9 @@
 //! Steelgum's authored scene data and validation.
 
+pub mod build;
+pub mod project;
 pub mod review;
+pub mod scene_edit;
 
 use std::collections::HashSet;
 
@@ -8,11 +11,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const SCENE_VERSION: u32 = 1;
+pub const MAX_DISPLAY_NAME_LENGTH: usize = 128;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SceneObject {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub center: [f32; 3],
     pub size: [f32; 3],
     pub color: [u8; 3],
@@ -20,6 +26,11 @@ pub struct SceneObject {
 }
 
 impl SceneObject {
+    /// The authored display name, falling back to the stable ID.
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.id)
+    }
+
     /// Tests a square footprint against the object's bounds in the XZ plane.
     pub fn overlaps_footprint(&self, position: [f32; 2], half_width: f32) -> bool {
         (position[0] - self.center[0]).abs() < self.size[0] / 2.0 + half_width
@@ -49,6 +60,10 @@ pub enum SceneError {
     InvalidId(String),
     #[error("duplicate scene object ID {0:?}")]
     DuplicateId(String),
+    #[error(
+        "object {0:?} needs a non-empty display name of up to {MAX_DISPLAY_NAME_LENGTH} characters without control characters"
+    )]
+    InvalidName(String),
     #[error("object {0:?} must have a finite center and finite, positive size")]
     InvalidBounds(String),
 }
@@ -74,6 +89,9 @@ impl Scene {
             if !ids.insert(&object.id) {
                 return Err(SceneError::DuplicateId(object.id.clone()));
             }
+            if object.name.as_deref().is_some_and(|name| !valid_name(name)) {
+                return Err(SceneError::InvalidName(object.id.clone()));
+            }
             if !object.center.iter().all(|value| value.is_finite())
                 || !object
                     .size
@@ -97,6 +115,12 @@ impl Scene {
     pub fn to_json(&self) -> Result<String, SceneError> {
         Ok(serde_json::to_string_pretty(&self.0)?)
     }
+}
+
+fn valid_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.chars().count() <= MAX_DISPLAY_NAME_LENGTH
+        && !name.chars().any(char::is_control)
 }
 
 #[cfg(test)]

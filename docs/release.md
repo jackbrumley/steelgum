@@ -3,8 +3,7 @@
 Steelgum follows the shared [App Standard](https://github.com/jackbrumley/jackbrumley.github.io/blob/main/APP_STANDARD.md)
 and [Release and Update Standard](https://github.com/jackbrumley/jackbrumley.github.io/blob/main/RELEASE_STANDARD.md),
 adapted to a native Rust desktop application. The updater, installers,
-packaging recipes and project page live in this repo. The first stable
-release and live site still need deployment and installation verification.
+packaging recipes and project page live in this repo.
 The shared checkout used here was `d551587` from 16 November 2026. GitHub
 DNS prevented fetching its current remote head from this workspace.
 
@@ -48,19 +47,33 @@ Keep project data in the project, separate from application settings and logs.
    The updater waits for the running process to exit before changing files.
    One module resolves the application's update log location.
 
+The workspace also exposes `steelgum --check-updates` for a JSON status and
+`steelgum --update` to start the installed application's worker for a newer
+stable version. `--update-failed` is reserved for the worker's failure relaunch.
+
 This updater applies to an installed Steelgum desktop application. Games in
 source repositories choose their Steelgum dependency with Cargo and retain
 their own release process. Updating the desktop tooling must not rewrite a
 game's declared dependency or its authored project files.
 
-## Linux packages
+## Desktop packages
 
-Build the x64 `.deb`, `.rpm` and AppImage from one staged desktop binary,
-launcher and icon on Ubuntu 22.04. `scripts/release-assets.mjs` selects the
-Cargo manifest for both the Linux and Windows builds. The selected binary
-must be named `steelgum` and report `steelgum X.Y.Z` with `--version`. When the
-desktop target changes, verify its linked and runtime-loaded libraries on the
-supported distributions and run the installed application on Wayland and X11.
+The Linux and Windows installers launch the GPUI workspace as `steelgum`.
+They also install `steelgum-player` alongside it for the bundled game. The
+workspace owns update checks, and the player opens only when launched for
+Play. The source-only `cargo dev` watcher stays outside the packages.
+Opening a worktree uses the system Git executable. Set up Git on Windows or
+when using the AppImage to review your projects. Native Linux packages
+declare Git as a package dependency.
+
+Build the x64 `.deb`, `.rpm` and AppImage from the staged workspace and player,
+launcher and icon on Ubuntu 22.04. `scripts/release-assets.mjs` selects both
+Cargo manifests and uses the workspace version for release metadata. The
+released workspace and bundled player report `steelgum X.Y.Z` with
+`--version`. Linux and Windows install verification checks these versions
+and the workspace's update status. Verify linked and runtime-loaded
+libraries on supported distributions and launch the installed workspace on
+Wayland and X11 before promoting a release.
 
 The default Linux installer uses `.deb` on Mint, Ubuntu and supported Debian
 versions or `.rpm` on Fedora. `--system` requires a native package and
@@ -75,7 +88,7 @@ to the package manager. The uninstall script supports both formats and keeps
 settings, projects and logs. Use `--appimage` or `--system` to remove just that
 format when both are present.
 
-## Before the first public release
+## Before publishing the packaged workspace
 
 - Choose the open-source licence, update the RPM `License` field, and verify
   the redistribution terms for packaged dependencies and shipped assets.

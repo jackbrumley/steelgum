@@ -2,13 +2,17 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow};
 use gpui::{App, Context, FocusHandle, PathPromptOptions, ScrollHandle, Task, Window};
-use steelgum::review::SceneReview;
+use steelgum::{project::ProjectManifest, review::SceneReview};
 
 use crate::viewport::Viewport;
 
+pub(crate) mod agent;
+mod assets;
 mod live_refresh;
+mod object_rename;
+mod recent;
 mod review_request;
 mod runner;
 mod workspace;
@@ -16,21 +20,23 @@ mod workspace;
 use live_refresh::SourceStamp;
 use review_request::ReviewDraft;
 
-use runner::{Job, RunState};
+use runner::{Job, JobControl, RunState};
 use workspace::Tool;
 
 const ROOM_PATHS: [&str; 2] = ["scenes/room.json", "examples/door-game/scenes/room.json"];
 pub(crate) struct Project {
-    name: String,
-    source: Option<(PathBuf, PathBuf)>,
+    pub(crate) name: String,
+    manifest: Option<ProjectManifest>,
+    pub(crate) source: Option<(PathBuf, PathBuf)>,
     initial_stamp: Option<SourceStamp>,
-    review: Rc<SceneReview>,
+    pub(crate) review: Rc<SceneReview>,
 }
 
 impl Project {
     pub fn demo(review: SceneReview) -> Self {
         Self {
             name: "Door Game example".into(),
+            manifest: None,
             source: None,
             initial_stamp: None,
             review: Rc::new(review),
@@ -38,11 +44,16 @@ impl Project {
     }
 
     pub fn open(repo: PathBuf, path: PathBuf) -> Result<Self> {
-        Ok(LoadedProject::read(repo, path)?.into_project())
+        Ok(LoadedProject::read(repo, Some(path))?.into_project())
+    }
+
+    pub fn discover(repo: PathBuf) -> Result<Self> {
+        Ok(LoadedProject::read(repo, None)?.into_project())
     }
 }
 
 struct LoadedProject {
+    manifest: Option<ProjectManifest>,
     repo: PathBuf,
     path: PathBuf,
     stamp: SourceStamp,
@@ -50,12 +61,24 @@ struct LoadedProject {
 }
 
 impl LoadedProject {
-    fn read(repo: PathBuf, path: PathBuf) -> Result<Self> {
+    fn read(repo: PathBuf, path: Option<PathBuf>) -> Result<Self> {
+        let repo = repo.canonicalize()?;
+        let manifest = ProjectManifest::discover(&repo)?;
+        let path = path
+            .or_else(|| manifest.as_ref().map(|manifest| manifest.scene.clone()))
+            .or_else(|| {
+                ROOM_PATHS
+                    .iter()
+                    .map(PathBuf::from)
+                    .find(|path| repo.join(path).is_file())
+            })
+            .ok_or_else(|| anyhow!("No steelgum.json or supported scene in {}", repo.display()))?;
         // Observe before reading so an edit during the read is still eligible
         // for the next live refresh.
         let stamp = SourceStamp::read(&repo, &path);
         let review = SceneReview::from_git(&repo, &path)?;
         Ok(Self {
+            manifest,
             repo,
             path,
             stamp,
@@ -64,9 +87,19 @@ impl LoadedProject {
     }
 
     fn into_project(self) -> Project {
-        let name = self.repo.file_name().unwrap_or(self.repo.as_os_str());
+        let name = self.manifest.as_ref().map_or_else(
+            || {
+                self.repo
+                    .file_name()
+                    .unwrap_or(self.repo.as_os_str())
+                    .to_string_lossy()
+                    .into_owned()
+            },
+            |manifest| manifest.name.clone(),
+        );
         Project {
-            name: name.to_string_lossy().into_owned(),
+            name,
+            manifest: self.manifest,
             source: Some((self.repo, self.path)),
             initial_stamp: Some(self.stamp),
             review: Rc::new(self.review),
@@ -79,6 +112,10 @@ pub(crate) struct ReviewWindow {
     before: bool,
     selected: Option<String>,
     review_draft: ReviewDraft,
+    assets: assets::AssetBrowser,
+    rename: Option<object_rename::RenameDraft>,
+    rename_focus: FocusHandle,
+    objects_focus: FocusHandle,
     review_focus: FocusHandle,
     objects_scroll: ScrollHandle,
     focus: bool,
@@ -98,6 +135,8 @@ pub(crate) struct ReviewWindow {
     search: String,
     release: bool,
     run_state: RunState,
+    job_control: Option<JobControl>,
+    job_progress: Option<String>,
 }
 
 impl ReviewWindow {
@@ -109,6 +148,10 @@ impl ReviewWindow {
             before: false,
             selected,
             review_draft: ReviewDraft::default(),
+            assets: assets::AssetBrowser::default(),
+            rename: None,
+            rename_focus: cx.focus_handle(),
+            objects_focus: cx.focus_handle(),
             review_focus: cx.focus_handle().tab_stop(true),
             objects_scroll: ScrollHandle::new(),
             focus: false,
@@ -128,9 +171,15 @@ impl ReviewWindow {
             search: String::new(),
             release: false,
             run_state: RunState::Idle,
+            job_control: None,
+            job_progress: None,
         };
         window.watch_project(cx);
         window
+    }
+
+    pub(crate) fn set_startup_notice(&mut self, notice: Option<String>) {
+        self.status = notice;
     }
 
     fn sample_viewport_fps(cx: &mut Context<Self>) {
@@ -190,7 +239,7 @@ impl ReviewWindow {
             let loaded = match selection {
                 Ok(Some(repo)) => cx
                     .background_executor()
-                    .spawn(async move { open_first_room(repo) })
+                    .spawn(async move { LoadedProject::read(repo, None) })
                     .await
                     .map(Some),
                 Ok(None) => Ok(None),
@@ -202,9 +251,15 @@ impl ReviewWindow {
                     Ok(Some(project)) => {
                         window.selected = first_selection(&project.review);
                         window.project = project.into_project();
+                        if let Err(error) = window.project.remember() {
+                            window.status =
+                                Some(format!("Could not remember this project: {error:#}"));
+                        }
                         window.watch_project(cx);
                         window.before = false;
                         window.review_draft = ReviewDraft::default();
+                        window.rename = None;
+                        window.assets = Default::default();
                         window.focus = false;
                         window.viewport.reset_pan();
                         window.run_state = RunState::Idle;
@@ -227,20 +282,6 @@ fn first_selection(review: &SceneReview) -> Option<String> {
         .find(|change| change.id == "plate")
         .or_else(|| review.changes().first())
         .map(|change| change.id.clone())
-}
-
-fn open_first_room(repo: PathBuf) -> Result<LoadedProject> {
-    let Some(scene) = ROOM_PATHS
-        .iter()
-        .map(PathBuf::from)
-        .find(|path| repo.join(path).is_file())
-    else {
-        bail!(
-            "No supported room at {}. Try scenes/room.json or pass a relative scene path on launch.",
-            repo.display()
-        );
-    };
-    LoadedProject::read(repo, scene)
 }
 
 fn label(id: &str) -> String {
@@ -284,6 +325,20 @@ mod tests {
             })
         })?;
         let after = app.capture_screenshot(window.into())?;
+        let capture = app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                view.viewport.capture(&crate::viewport::View {
+                    review: view.project.review.clone(),
+                    before: view.before,
+                    selection: view.selected.clone(),
+                    focus: view.focus,
+                    top_down: view.top_down,
+                })
+            })
+        })??;
+        let image = image::load_from_memory(&capture()?)?;
+        assert!(image.width() > 100 && image.height() > 100);
+
         app.update(|cx| {
             window.update(cx, |view, _, cx| {
                 view.show_tool(Tool::Objects);

@@ -21,6 +21,7 @@ pub enum ObjectChanges {
     Added,
     Removed,
     Modified {
+        name: bool,
         color: bool,
         center: bool,
         size: bool,
@@ -31,6 +32,7 @@ pub enum ObjectChanges {
 #[derive(Debug)]
 pub struct SceneReview {
     base_revision: Option<String>,
+    working_text: Option<String>,
     before: Scene,
     after: Scene,
     changes: Vec<ObjectChange>,
@@ -93,6 +95,7 @@ impl SceneReview {
         changes.sort_unstable_by(|left, right| left.id.cmp(&right.id));
         Self {
             base_revision: None,
+            working_text: None,
             before,
             after,
             changes,
@@ -134,6 +137,7 @@ impl SceneReview {
             parse_scene(&working_text, "working tree", scene_path)?,
         );
         review.base_revision = Some(head);
+        review.working_text = Some(working_text);
         Ok(review)
     }
 
@@ -150,6 +154,11 @@ impl SceneReview {
         self.base_revision.as_deref()
     }
 
+    /// The exact working-tree text used for this review, suitable for edit conflict checks.
+    pub fn working_text(&self) -> Option<&str> {
+        self.working_text.as_deref()
+    }
+
     pub fn before(&self) -> &Scene {
         &self.before
     }
@@ -164,11 +173,13 @@ impl SceneReview {
 }
 
 fn modified(before: &SceneObject, after: &SceneObject) -> Option<ObjectChanges> {
+    let name = before.name != after.name;
     let color = before.color != after.color;
     let center = before.center != after.center;
     let size = before.size != after.size;
     let solid = before.solid != after.solid;
-    (color || center || size || solid).then_some(ObjectChanges::Modified {
+    (name || color || center || size || solid).then_some(ObjectChanges::Modified {
+        name,
         color,
         center,
         size,
@@ -261,6 +272,7 @@ mod tests {
                 ObjectChange {
                     id: "door".to_owned(),
                     changes: ObjectChanges::Modified {
+                        name: false,
                         color: false,
                         center: true,
                         size: true,
@@ -274,6 +286,7 @@ mod tests {
                 ObjectChange {
                     id: "plate".to_owned(),
                     changes: ObjectChanges::Modified {
+                        name: false,
                         color: true,
                         center: false,
                         size: false,
@@ -300,6 +313,26 @@ mod tests {
             &[ObjectChange {
                 id: "marker".to_owned(),
                 changes: ObjectChanges::Added
+            }]
+        );
+    }
+
+    #[test]
+    fn rename_is_a_property_change_on_the_same_object() {
+        let named = BLUE_PLATE.replace("{\"id\"", "{\"name\":\"Release plate\",\"id\"");
+        let review = SceneReview::new(scene(&[BLUE_PLATE]), scene(&[&named]));
+
+        assert_eq!(
+            review.changes(),
+            &[ObjectChange {
+                id: "plate".to_owned(),
+                changes: ObjectChanges::Modified {
+                    name: true,
+                    color: false,
+                    center: false,
+                    size: false,
+                    solid: false,
+                },
             }]
         );
     }

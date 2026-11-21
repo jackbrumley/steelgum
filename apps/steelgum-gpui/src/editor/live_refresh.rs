@@ -137,10 +137,12 @@ impl ReviewWindow {
                     review.before().object(id).is_none() && review.after().object(id).is_none()
                 }) {
                     self.selected = None;
+                    self.rename = None;
                     self.review_draft = ReviewDraft::default();
                     self.focus = false;
                 }
                 self.project.review = Rc::new(review);
+                self.reveal_selected_object();
                 self.live_issue = None;
             }
             Err(error) => self.live_issue = Some(error),

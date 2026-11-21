@@ -14,6 +14,10 @@
   #error SteelgumBinary is required
 #endif
 
+#ifndef SteelgumPlayer
+  #error SteelgumPlayer is required
+#endif
+
 [Setup]
 AppId={{CA30D8B3-ACB0-4951-B503-2F91D6DD3BD4}
 AppName=Steelgum
@@ -38,7 +42,8 @@ Compression=lzma2
 SolidCompression=yes
 
 [Files]
-Source: "{#SteelgumBinary}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SteelgumBinary}"; DestDir: "{app}"; DestName: "steelgum.exe"; Flags: ignoreversion
+Source: "{#SteelgumPlayer}"; DestDir: "{app}"; DestName: "steelgum-player.exe"; Flags: ignoreversion
 Source: "{#SteelgumIcon}"; DestDir: "{app}"
 
 [Icons]

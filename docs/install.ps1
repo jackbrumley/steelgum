@@ -26,6 +26,7 @@ $debugDir = Join-Path $env:USERPROFILE '.config\steelgum\debug'
 $logFile = Join-Path $debugDir 'update.log'
 $installDir = Join-Path $env:LOCALAPPDATA 'Programs\Steelgum'
 $installedExe = Join-Path $installDir 'steelgum.exe'
+$installedPlayerExe = Join-Path $installDir 'steelgum-player.exe'
 $lock = $null
 $tempDir = $null
 $failed = $false
@@ -97,9 +98,9 @@ function Save-ReleaseAsset([uri]$Url, [string]$Destination) {
 }
 
 function Close-InstalledSteelgum {
-  foreach ($process in @(Get-Process -Name 'steelgum' -ErrorAction SilentlyContinue)) {
+  foreach ($process in @(Get-Process -Name 'steelgum', 'steelgum-player' -ErrorAction SilentlyContinue)) {
     try {
-      if (-not $process.HasExited -and $process.Path -ieq $installedExe) {
+      if (-not $process.HasExited -and @($installedExe, $installedPlayerExe) -icontains $process.Path) {
         Write-InstallLog 'Closing the installed Steelgum window.'
         if (-not $process.CloseMainWindow() -or -not $process.WaitForExit(10000)) {
           throw 'Close all installed Steelgum windows and run the installer again.'

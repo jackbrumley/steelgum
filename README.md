@@ -9,7 +9,20 @@ The first example is **Door Game**, a small 3D room with a pressure plate and a
 door. It exercises the same game rules from a headless test and the native
 window. [Architecture](docs/architecture.md) explains the design and priorities.
 
-## Run from source
+## Open the workspace
+
+From a source checkout, launch the native workspace with:
+
+```sh
+cargo dev
+```
+
+To open a game repository directly, run `cargo dev /path/to/game`.
+The workspace loads the scene and runner declared in `steelgum.json`.
+See the [desktop workspace guide](apps/steelgum-gpui/README.md) for review,
+project setup, and the local agent interface.
+
+## Run the Door Game examples
 
 Play the visual prototype from a graphical terminal with Rust and Tcl/Tk
 (`wish`).
@@ -33,7 +46,7 @@ The demo prints the final game state as JSON and exits with an error if the
 player fails to reach the goal. Inspect a room file with
 `cargo run -p door-game -- --inspect examples/door-game/scenes/room.json`.
 
-Use Rust 1.97.1 or newer for the Bevy runner. Interactive play requires a
+The Bevy runner pins Rust 1.99.1. Interactive play requires a
 working graphical session and graphics adapter.
 
 ```sh
@@ -54,16 +67,16 @@ cargo run --manifest-path apps/door-game-bevy/Cargo.toml -- --capture door-game.
 Pass `--scene path/to/room.json` to the runner to play or capture an edited
 scene. The headless demo accepts the path after `--demo`.
 
-Press F6 in the Bevy window to check for updates. Packaged installations also
-check in the background at startup and can update themselves. Source builds
-can read release information and stay under Cargo’s control.
+Press F6 in the installed workspace to check for updates. Packaged
+installations also check in the background at startup. Source builds use
+Cargo for updates.
 
 The [Steelgum install page](https://brumley.info/steelgum/) offers native x64
 Linux packages through `apt` or `dnf` on supported releases and a user-local
 AppImage. To switch from the AppImage, run the System Install command again.
 
 Run `python3 scripts/verify.py` for local verification, or add
-`--headless-only --offline` to use cached dependencies without the
-Bevy runner. See
+`--headless-only --offline` to verify the headless components using cached
+dependencies. See
 [agent guidelines](AGENTS.md) for development rules and [release and
 updates](docs/release.md) for the first public release plan.

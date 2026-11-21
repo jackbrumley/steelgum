@@ -36,6 +36,22 @@ pub(crate) struct Viewport {
 }
 
 impl Viewport {
+    pub fn rendered_frames(&self) -> u64 {
+        #[cfg(any(target_os = "linux", windows))]
+        {
+            self.surface.rendered_frames()
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            0
+        }
+    }
+
+    pub fn reset_pan(&self) {
+        #[cfg(any(target_os = "linux", windows))]
+        self.surface.reset_pan();
+    }
+
     pub fn element(&self, view: View) -> AnyElement {
         #[cfg(any(target_os = "linux", windows))]
         {

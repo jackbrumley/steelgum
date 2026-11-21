@@ -342,7 +342,20 @@ impl ReviewWindow {
                                 cx.notify();
                             },
                         ))
-                    })),
+                    }))
+                    .child(
+                        div()
+                            .w(px(63.))
+                            .flex_none()
+                            .text_right()
+                            .text_xs()
+                            .text_color(rgb(MUTED))
+                            .child(if self.viewport_fps == 0 {
+                                "FPS idle".to_owned()
+                            } else {
+                                format!("{} FPS", self.viewport_fps)
+                            }),
+                    ),
             )
             .child(if selection_missing {
                 div()
@@ -371,9 +384,9 @@ impl ReviewWindow {
                             .text_sm()
                             .text_color(rgb(MUTED))
                             .child(if self.top_down {
-                                "Scroll to zoom"
+                                "Middle-drag to pan · Scroll to zoom"
                             } else {
-                                "Drag to orbit · Scroll to zoom"
+                                "Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
                             }),
                     )
                     .when(self.selected.is_some(), |bar| {
@@ -386,6 +399,7 @@ impl ReviewWindow {
                             action("focus-object", title, self.focus).on_click(cx.listener(
                                 |view, _, _, cx| {
                                     view.focus = !view.focus;
+                                    view.viewport.reset_pan();
                                     cx.notify();
                                 },
                             )),

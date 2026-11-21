@@ -10,6 +10,19 @@ cd apps/steelgum-gpui
 cargo run --locked
 ```
 
+For automatic rebuilds, run this from the Steelgum repository root:
+
+```sh
+python3 scripts/dev.py
+```
+
+It watches the desktop source, Steelgum core, and bundled demo scene. A
+successful build restarts the window. A compile error leaves the previous
+window open, with diagnostics in the terminal. Press **Ctrl+C** to stop.
+To reopen the same project after each restart, pass the worktree and scene
+path to the watcher, such as `python3 scripts/dev.py /path/to/worktree
+scenes/room.json`.
+
 The directory pins Rust 1.99.1. On Debian-based Linux systems, the build uses
 `pkg-config`, `libxcb1-dev`, `libfreetype-dev`, `libfontconfig1-dev`,
 `libwayland-dev`, `libxkbcommon-dev` and `libxkbcommon-x11-dev`. To open the
@@ -22,9 +35,10 @@ Rust target and Windows build tools for the Windows experiment.
 - **Changes** opens the right pane. Select **Pressure plate** and switch
   between **Before** and **After** to see the colour change. Use **Scene**
   or **Assets** to browse objects in the selected revision.
-- Drag to orbit in **3D**, scroll to zoom, or choose **2D** for a top-down
-  view. **Focus Object** isolates the selected object. Closing either
-  sidebar gives the viewport more space.
+- Left-drag to orbit in **3D**. Middle-drag to pan and scroll to zoom in
+  either view. Choose **2D** for a top-down view. **Focus Object** isolates the selected object. Closing either
+  sidebar gives the viewport more space. The FPS readout counts newly
+  rendered scene frames. It shows **FPS idle** while the viewport is still.
 - **Build Game** opens the build pane. Choose **Debug** or **Release** and
   click **Build** to compile for the host. **Play** uses the selected profile
   and opens a separate game window. The bundled example plays the **After**

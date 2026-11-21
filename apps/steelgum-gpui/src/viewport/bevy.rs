@@ -51,6 +51,8 @@ struct Orbit {
     yaw: f32,
     pitch: f32,
     zoom: f32,
+    pan: Vec3,
+    map_pan: Vec3,
 }
 
 impl Default for Orbit {
@@ -59,6 +61,8 @@ impl Default for Orbit {
             yaw: 0.57,
             pitch: 0.78,
             zoom: 1.0,
+            pan: Vec3::ZERO,
+            map_pan: Vec3::ZERO,
         }
     }
 }
@@ -69,6 +73,7 @@ struct Renderer {
     size: [u32; 2],
     displayed: Option<View>,
     orbit: Orbit,
+    frames: u64,
 }
 
 impl Renderer {
@@ -148,6 +153,7 @@ impl Renderer {
             size,
             displayed: None,
             orbit: Orbit::default(),
+            frames: 0,
         })
     }
 
@@ -193,6 +199,7 @@ impl Renderer {
                 // the first demand-driven paint so a parked window has a scene.
                 self.apps.update();
             }
+            self.frames += 1;
         }
 
         let frame = self
@@ -283,25 +290,51 @@ fn rebuild_room(world: &mut World, view: &View) {
     }
 }
 
-fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
-    let focused = view
-        .selection
+fn camera_distance(view: &View, orbit: Orbit, size: [u32; 2]) -> f32 {
+    let scale =
+        focused_object(view).map_or(17., |object| Vec3::from_array(object.size).length() * 1.75);
+    let aspect = size[0] as f32 / size[1] as f32;
+    scale * orbit.zoom / aspect.min(1.)
+}
+
+fn focused_object(view: &View) -> Option<&steelgum::SceneObject> {
+    view.selection
         .as_deref()
         .filter(|_| view.focus)
-        .and_then(|id| view.scene().object(id));
-    let target = focused.map_or(Vec3::ZERO, |object| Vec3::from_array(object.center));
-    let scale = focused.map_or(17., |object| Vec3::from_array(object.size).length() * 1.75);
-    let aspect = size[0] as f32 / size[1] as f32;
-    let distance = scale * orbit.zoom / aspect.min(1.);
-    let direction = Vec3::new(
-        orbit.yaw.sin() * orbit.pitch.cos(),
-        orbit.pitch.sin(),
-        orbit.yaw.cos() * orbit.pitch.cos(),
-    );
+        .and_then(|id| view.scene().object(id))
+}
+
+impl Orbit {
+    fn direction(self) -> Vec3 {
+        Vec3::new(
+            self.yaw.sin() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.yaw.cos() * self.pitch.cos(),
+        )
+    }
+
+    fn pan_by(&mut self, view: &View, size: [u32; 2], dx: f32, dy: f32) {
+        let distance = camera_distance(view, *self, size);
+        if view.top_down {
+            self.map_pan += (-Vec3::X * dx - Vec3::Z * dy) * (distance / size[1] as f32);
+        } else {
+            let direction = self.direction();
+            let right = Vec3::Y.cross(direction).normalize();
+            let up = direction.cross(right);
+            let frustum_height = 2. * distance * (PerspectiveProjection::default().fov * 0.5).tan();
+            self.pan += (-right * dx + up * dy) * (frustum_height / size[1] as f32);
+        }
+    }
+}
+
+fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
+    let center = focused_object(view).map_or(Vec3::ZERO, |object| Vec3::from_array(object.center));
+    let distance = camera_distance(view, orbit, size);
     let mut cameras =
         world.query_filtered::<(&mut Transform, &mut Projection), With<ReviewCamera>>();
     for (mut camera, mut projection) in cameras.iter_mut(world) {
         if view.top_down {
+            let target = center + orbit.map_pan;
             *camera =
                 Transform::from_translation(target + Vec3::Y * 20.).looking_at(target, Vec3::NEG_Z);
             *projection = OrthographicProjection {
@@ -312,7 +345,8 @@ fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
             }
             .into();
         } else {
-            *camera = Transform::from_translation(target + direction * distance)
+            let target = center + orbit.pan;
+            *camera = Transform::from_translation(target + orbit.direction() * distance)
                 .looking_at(target, Vec3::Y);
             if !matches!(*projection, Projection::Perspective(_)) {
                 *projection = Projection::Perspective(PerspectiveProjection::default());
@@ -325,18 +359,34 @@ fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
 pub(super) struct Surface {
     renderer: Rc<RefCell<Option<Renderer>>>,
     orbit: Rc<Cell<Orbit>>,
-    previous: Rc<Cell<Option<SurfacePoint>>>,
+    drag: Rc<Cell<Option<(SurfaceButton, SurfacePoint)>>>,
     error: Rc<RefCell<Option<String>>>,
 }
 
 impl Surface {
+    pub fn rendered_frames(&self) -> u64 {
+        self.renderer
+            .borrow()
+            .as_ref()
+            .map_or(0, |renderer| renderer.frames)
+    }
+
+    pub fn reset_pan(&self) {
+        let mut orbit = self.orbit.get();
+        orbit.pan = Vec3::ZERO;
+        orbit.map_pan = Vec3::ZERO;
+        self.orbit.set(orbit);
+    }
+
     pub fn element(&self, view: View) -> AnyElement {
         let (renderer, error, orbit) = (
             self.renderer.clone(),
             self.error.clone(),
             self.orbit.clone(),
         );
-        let top_down = view.top_down;
+        let input_view = view.clone();
+        let size = Rc::new(Cell::new([1, 1]));
+        let surface_size = size.clone();
         let canvas = gpu_canvas(move |gpu| {
             if error.borrow().is_some() {
                 return;
@@ -347,6 +397,7 @@ impl Surface {
                 (pixels.width.0 * scale).round().max(1.) as u32,
                 (pixels.height.0 * scale).round().max(1.) as u32,
             ];
+            surface_size.set(size);
             let mut renderer = renderer.borrow_mut();
             let result = (|| -> Result<()> {
                 if renderer.is_none() {
@@ -364,34 +415,39 @@ impl Surface {
             }
         })
         .size_full();
-        let previous = self.previous.clone();
+        let drag = self.drag.clone();
         let orbit = self.orbit.clone();
         let interactive = surface_input(canvas, move |input: SurfaceInput| match input.event {
             SurfaceEvent::PointerDown {
                 position,
-                button: SurfaceButton::Left,
+                button: button @ (SurfaceButton::Left | SurfaceButton::Middle),
                 ..
-            } => {
-                previous.set(Some(position));
-            }
+            } => drag.set(Some((button, position))),
             SurfaceEvent::PointerMove {
-                position,
-                pressed: Some(SurfaceButton::Left),
-                ..
-            } if !top_down => {
-                if let Some(last) = previous.get() {
-                    previous.set(Some(position));
+                position, pressed, ..
+            } => {
+                if let Some((button, last)) = drag.get()
+                    && pressed == Some(button)
+                {
+                    drag.set(Some((button, position)));
                     let mut camera = orbit.get();
-                    camera.yaw -= (position.x - last.x) * 0.007;
-                    camera.pitch = (camera.pitch + (position.y - last.y) * 0.007).clamp(0.12, 1.48);
+                    let dx = position.x - last.x;
+                    let dy = position.y - last.y;
+                    match button {
+                        SurfaceButton::Middle => camera.pan_by(&input_view, size.get(), dx, dy),
+                        SurfaceButton::Left if !input_view.top_down => {
+                            camera.yaw -= dx * 0.007;
+                            camera.pitch = (camera.pitch + dy * 0.007).clamp(0.12, 1.48);
+                        }
+                        _ => {}
+                    }
                     orbit.set(camera);
                 }
             }
-            SurfaceEvent::PointerUp {
-                button: SurfaceButton::Left,
-                ..
-            } => {
-                previous.set(None);
+            SurfaceEvent::PointerUp { button, .. } => {
+                if drag.get().is_some_and(|(active, _)| active == button) {
+                    drag.set(None);
+                }
             }
             SurfaceEvent::Scroll { delta, .. } => {
                 let amount = match delta {

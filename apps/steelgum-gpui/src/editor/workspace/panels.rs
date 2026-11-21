@@ -131,6 +131,9 @@ impl ReviewWindow {
             .child(div().text_sm().child(label(&id)))
             .when_some(detail, |row, detail| row.child(note(detail)))
             .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
+                if view.focus && view.selected.as_ref() != Some(&id) {
+                    view.viewport.reset_pan();
+                }
                 view.selected = Some(id.clone());
                 cx.notify();
             }))

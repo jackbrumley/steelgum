@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
 use gpui::{App, Context, FocusHandle, PathPromptOptions, Window};
@@ -52,6 +53,7 @@ pub(crate) struct ReviewWindow {
     status: Option<String>,
     loading: bool,
     viewport: Viewport,
+    viewport_fps: u32,
     top_down: bool,
     menu_open: bool,
     tool: Option<Tool>,
@@ -64,7 +66,8 @@ pub(crate) struct ReviewWindow {
 }
 
 impl ReviewWindow {
-    pub fn new(project: Project, cx: &mut App) -> Self {
+    pub fn new(project: Project, cx: &mut Context<Self>) -> Self {
+        Self::sample_viewport_fps(cx);
         let selected = first_selection(&project.review);
         Self {
             project,
@@ -74,6 +77,7 @@ impl ReviewWindow {
             status: None,
             loading: false,
             viewport: Viewport::default(),
+            viewport_fps: 0,
             top_down: false,
             menu_open: true,
             tool: Some(Tool::Changes),
@@ -84,6 +88,37 @@ impl ReviewWindow {
             release: false,
             run_state: RunState::Idle,
         }
+    }
+
+    fn sample_viewport_fps(cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let mut previous_frames = 0;
+            let mut sampled_at = Instant::now();
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(500))
+                    .await;
+                if this
+                    .update(cx, |view, cx| {
+                        let now = Instant::now();
+                        let frames = view.viewport.rendered_frames();
+                        let fps = ((frames - previous_frames) as f64
+                            / now.duration_since(sampled_at).as_secs_f64())
+                        .round() as u32;
+                        previous_frames = frames;
+                        sampled_at = now;
+                        if view.viewport_fps != fps {
+                            view.viewport_fps = fps;
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -125,6 +160,7 @@ impl ReviewWindow {
                         window.apply_loaded(repo, path, review);
                         window.before = false;
                         window.focus = false;
+                        window.viewport.reset_pan();
                         window.run_state = RunState::Idle;
                         window.show_tool(Tool::Changes);
                     }
@@ -220,7 +256,10 @@ fn label(id: &str) -> String {
 mod tests {
     use std::sync::Arc;
 
-    use gpui::{AppContext, HeadlessAppContext, Keystroke, current_headless_renderer, px, size};
+    use gpui::{
+        AppContext, HeadlessAppContext, Keystroke, MouseButton, MouseDownEvent, MouseMoveEvent,
+        MouseUpEvent, PlatformInput, current_headless_renderer, point, px, size,
+    };
     use gpui_wgpu::CosmicTextSystem;
 
     use super::*;
@@ -242,9 +281,14 @@ mod tests {
             })
         })?;
         let after = app.capture_screenshot(window.into())?;
+        app.update_window(window.into(), |_, window, cx| middle_drag(window, cx))?;
+        let panned_3d = app.capture_screenshot(window.into())?;
+        assert_ne!(after, panned_3d, "middle drag should pan the 3D view");
+
         app.update(|cx| {
             window.update(cx, |view, window, cx| {
                 view.before = true;
+                view.viewport.reset_pan();
                 window.refresh();
                 cx.notify();
             })
@@ -260,6 +304,9 @@ mod tests {
         })?;
         let top_down = app.capture_screenshot(window.into())?;
         assert_ne!(before, top_down, "2D should change the displayed frame");
+        app.update_window(window.into(), |_, window, cx| middle_drag(window, cx))?;
+        let panned_2d = app.capture_screenshot(window.into())?;
+        assert_ne!(top_down, panned_2d, "middle drag should pan the 2D view");
 
         app.update_window(window.into(), |_, window, cx| {
             assert!(window.dispatch_keystroke(Keystroke::parse("ctrl-k").unwrap(), cx));
@@ -298,6 +345,38 @@ mod tests {
             "expected red plate in the after view ({red_before} before, {red_after} after)"
         );
         Ok(())
+    }
+
+    fn middle_drag(window: &mut Window, cx: &mut App) {
+        let start = point(px(420.), px(320.));
+        let end = point(px(480.), px(345.));
+        let button = MouseButton::Middle;
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position: start,
+                button,
+                click_count: 1,
+                ..Default::default()
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position: end,
+                pressed_button: Some(button),
+                ..Default::default()
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position: end,
+                button,
+                click_count: 1,
+                ..Default::default()
+            }),
+            cx,
+        );
     }
 
     fn count_plate_pixels(image: &image::RgbaImage) -> (usize, usize) {

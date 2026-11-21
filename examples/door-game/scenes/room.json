@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "objects": [
+    {"id": "floor", "center": [0, -0.15, 0], "size": [6, 0.3, 10], "color": [96, 106, 113], "solid": false},
+    {"id": "west-wall", "center": [-3, 0.22, 0], "size": [0.3, 0.44, 10], "color": [47, 59, 70], "solid": true},
+    {"id": "east-wall", "center": [3, 0.22, 0], "size": [0.3, 0.44, 10], "color": [47, 59, 70], "solid": true},
+    {"id": "start-wall", "center": [0, 0.22, 5], "size": [6.3, 0.44, 0.3], "color": [47, 59, 70], "solid": true},
+    {"id": "end-wall", "center": [0, 0.22, -5], "size": [6.3, 0.44, 0.3], "color": [47, 59, 70], "solid": true},
+    {"id": "left-partition", "center": [-1.93, 0.55, 0], "size": [2.15, 1.1, 0.36], "color": [65, 75, 85], "solid": true},
+    {"id": "right-partition", "center": [1.93, 0.55, 0], "size": [2.15, 1.1, 0.36], "color": [65, 75, 85], "solid": true},
+    {"id": "door", "center": [0, 0.6, 0], "size": [1.7, 1.2, 0.32], "color": [239, 129, 47], "solid": true},
+    {"id": "plate", "center": [0, 0.035, 1.48], "size": [1.35, 0.07, 1.05], "color": [45, 149, 236], "solid": false},
+    {"id": "goal", "center": [0, 0.035, -3.15], "size": [1.55, 0.07, 1.35], "color": [66, 200, 132], "solid": false},
+    {"id": "player", "center": [0, 0.3, 3.7], "size": [0.6, 0.6, 0.6], "color": [243, 231, 179], "solid": false}
+  ]
+}

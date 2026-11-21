@@ -1,0 +1,210 @@
+name: Release
+run-name: Steelgum ${{ github.ref }} at ${{ github.sha }}
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RUSTUP_TOOLCHAIN: 1.99.1
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: 26.13.0
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      version: ${{ steps.metadata.outputs.version }}
+      linux: ${{ steps.metadata.outputs.linux }}
+      windows: ${{ steps.metadata.outputs.windows }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Validate release metadata
+        id: metadata
+        shell: bash
+        run: |
+          tag=$(node scripts/release-assets.mjs tag)
+          repo=$(node scripts/release-assets.mjs repo)
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if [[ "$GITHUB_REF" != "refs/tags/$tag" || "$GITHUB_REPOSITORY" != "$repo" ]]; then
+              printf '::error::Expected %s in %s.\n' "$tag" "$repo"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/dev; then
+              printf '::error::Release tag %s must refer to a commit on dev.\n' "$tag"
+              exit 1
+            fi
+          fi
+          {
+            printf 'tag=%s\n' "$tag"
+            printf 'version=%s\n' "$(node scripts/release-assets.mjs version)"
+            printf 'linux=%s\n' "$(node scripts/release-assets.mjs asset linux)"
+            printf 'windows=%s\n' "$(node scripts/release-assets.mjs asset windows)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Ensure a public prerelease exists for testing
+        if: github.event_name == 'push'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.metadata.outputs.tag }}
+        run: |
+          if state=$(gh release view "$TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft] | @tsv'); then
+            if [[ "$state" != $'true\tfalse' ]]; then
+              printf '::error::Release %s exists outside the prerelease channel.\n' "$TAG"
+              exit 1
+            fi
+          else
+            notes="$RUNNER_TEMP/release-notes.md"
+            node scripts/release-assets.mjs notes > "$notes"
+            gh release create "$TAG" --verify-tag --prerelease --title "$TAG" --notes-file "$notes"
+          fi
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 90
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends build-essential ca-certificates curl \
+            desktop-file-utils file git libwayland-dev libxkbcommon-dev pkg-config
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -o pipefail
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs |
+            sh -s -- -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN"
+          printf '%s/.cargo/bin\n' "$HOME" >> "$GITHUB_PATH"
+      - name: Build and smoke-test AppImage
+        shell: bash
+        run: bash packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: steelgum-linux
+          path: release-artifacts/${{ needs.prepare.outputs.linux }}
+          if-no-files-found: error
+
+  windows:
+    needs: prepare
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Rust toolchain
+        run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal
+      - name: Build per-user installer
+        run: ./packaging/windows/build-setup.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: steelgum-windows
+          path: release-artifacts/${{ needs.prepare.outputs.windows }}
+          if-no-files-found: error
+
+  verify:
+    if: github.event_name == 'push'
+    needs: [prepare, linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: steelgum-*
+          path: release-artifacts
+          merge-multiple: true
+      - name: Upload and verify exact release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          LINUX_ASSET: ${{ needs.prepare.outputs.linux }}
+          WINDOWS_ASSET: ${{ needs.prepare.outputs.windows }}
+        run: |
+          state=$(gh release view "$TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft] | @tsv')
+          if [[ "$state" != $'true\tfalse' ]]; then
+            printf '::error::Release %s is no longer a prerelease.\n' "$TAG"
+            exit 1
+          fi
+          gh release upload "$TAG" "release-artifacts/$LINUX_ASSET" "release-artifacts/$WINDOWS_ASSET" --clobber
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
+          node scripts/release-assets.mjs verify "$RUNNER_TEMP/release.json"
+
+  install:
+    needs: [prepare, verify]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    env:
+      STEELGUM_GITHUB_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Install and reinstall Linux AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: |
+          export HOME="$RUNNER_TEMP/Steelgum Test Home"
+          mkdir -p "$HOME"
+          bash docs/install.sh --version "$TAG" --appimage --yes --no-relaunch
+          bash docs/install.sh --version "$TAG" --appimage --yes --no-relaunch
+          actual=$("$HOME/.local/bin/steelgum" --version)
+          if [[ "$actual" != "steelgum $VERSION" ]]; then
+            printf '::error::Expected steelgum %s, got %s.\n' "$VERSION" "$actual"
+            exit 1
+          fi
+      - name: Install and reinstall Windows user package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File docs/install.ps1 -Version $env:TAG -NoRelaunch
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File docs/install.ps1 -Version $env:TAG -NoRelaunch
+          $app = Join-Path $env:LOCALAPPDATA 'Programs/Steelgum/steelgum.exe'
+          $actual = & $app --version
+          if ($actual -cne "steelgum $env:VERSION") {
+            throw "Expected steelgum $env:VERSION, got $actual."
+          }

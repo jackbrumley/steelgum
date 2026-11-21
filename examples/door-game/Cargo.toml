@@ -1,0 +1,15 @@
+[package]
+name = "door-game"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+steelgum = { path = "../../crates/steelgum" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

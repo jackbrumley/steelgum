@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Steelgum · Rust game development framework</title>
+  <meta name="description" content="Build games with people and coding agents. Start with Steelgum's playable Door Game and edit, run, and test the same scene from source." />
+  <link rel="icon" href="assets/steelgum.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="https://brumley.info/shared/v1/app-page.css" />
+  <style>:root { --app-accent: #17626f; --app-accent-2: #76e5df; --app-accent-dark: #76e5df; }</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-inner">
+      <nav class="crumb"><a href="https://brumley.info/">← All apps</a><a href="https://brumley.info/">by Jack Brumley</a></nav>
+      <div class="hero-row">
+        <div class="hero-copy">
+          <span class="hero-tile"><img src="assets/steelgum.svg" alt="" width="64" height="64" /></span>
+          <h1>Steelgum</h1>
+          <p class="tagline">A Rust framework for building and testing games with coding agents.</p>
+        </div>
+        <img class="hero-art" src="assets/steelgum.svg" alt="" width="320" height="320" />
+      </div>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="install" id="source-build" aria-labelledby="source-heading">
+      <h2 id="source-heading">Run the prototype</h2>
+      <p class="install-hint">Steelgum is in development. From the source checkout, run the playable prototype with Rust and Tcl/Tk (<code>wish</code>):</p>
+      <pre class="install-code-block"><code>cargo run -p door-game -- --preview</code></pre>
+      <p class="install-note">Use the arrow keys or WASD to move, or press Space to watch the automated playthrough.</p>
+      <a class="manual-btn" href="https://github.com/jackbrumley/steelgum">Source and build instructions</a>
+    </section>
+
+    <section class="install" id="release-install" aria-label="Install" hidden>
+      <div class="platform-labels" id="platform-labels" role="tablist" aria-label="Platform">
+        <button type="button" class="platform-label" data-platform="linux" role="tab">Linux</button>
+        <button type="button" class="platform-label" data-platform="windows" role="tab">Windows</button>
+        <div class="platform-tab-indicator" id="platform-tab-indicator"></div>
+      </div>
+      <p class="install-hint" id="install-hint" aria-live="polite"></p>
+      <div class="install-code-wrapper">
+        <pre class="install-code-block" id="install-code"></pre>
+        <button type="button" class="install-copy-btn" id="install-copy-btn" aria-label="Copy command"></button>
+      </div>
+      <div class="install-variants" id="install-variants"></div>
+      <p class="install-note" id="install-note"></p>
+      <div class="install-manual">
+        <a class="manual-btn" href="https://github.com/jackbrumley/steelgum/releases/latest">Manual download</a>
+      </div>
+    </section>
+
+    <section class="features">
+      <h2>What it does</h2>
+      <p class="features-lead">Steelgum keeps game rules, assets, and editable scenes in a normal source repository. People and coding agents can run the same simulation, inspect the results, and review changes before they land. Door Game is the first example.</p>
+      <ul>
+        <li>Edit a room in JSON and review changes in Git.</li>
+        <li>Play the room yourself or replay the same game rules automatically.</li>
+        <li>Inspect the result from the Rust CLI or the graphical preview.</li>
+      </ul>
+    </section>
+
+    <section class="shots">
+      <h2>Door Game</h2>
+      <figure>
+        <img src="assets/door-game-preview.png" alt="Door Game preview with an overhead view of the room, the open door, and the player at the goal." width="960" height="650" loading="lazy" style="max-width: 100%; height: auto;" />
+        <figcaption>The scripted playthrough reaches the goal in the 2D preview.</figcaption>
+      </figure>
+    </section>
+
+    <footer class="site-footer">
+      <nav class="other-apps" aria-label="Other apps by Jack Brumley">
+        <div class="other-apps-head">
+          <p class="section-title">Other apps</p>
+          <a class="all-apps" href="https://brumley.info/">All apps &rarr;</a>
+        </div>
+        <ul class="app-tiles" data-other-apps data-current="steelgum"></ul>
+      </nav>
+      <p class="footer-meta">
+        <span>&copy; Jack Brumley</span>
+        <span aria-hidden="true">&middot;</span>
+        <a href="https://github.com/jackbrumley/steelgum">Source on GitHub</a>
+      </p>
+    </footer>
+  </main>
+
+  <script type="application/json" id="install-config">
+  {
+    "linux": {
+      "appimage": {
+        "label": "AppImage",
+        "command": "curl --proto '=https' --tlsv1.2 -sSf https://brumley.info/steelgum/install.sh | bash",
+        "hint": "Open <strong>Terminal</strong> and run:",
+        "note": "Installs Steelgum for your user on x64 Linux."
+      }
+    },
+    "windows": {
+      "user": {
+        "label": "User Install",
+        "command": "irm https://brumley.info/steelgum/install.ps1 | iex",
+        "hint": "Open <strong>PowerShell</strong> and run:",
+        "note": "Installs Steelgum for your user on x64 Windows."
+      }
+    }
+  }
+  </script>
+  <script type="module">
+    const repository = 'jackbrumley/steelgum';
+    try {
+      const response = await fetch('https://api.github.com/repos/' + repository + '/releases/latest', {
+        headers: { Accept: 'application/vnd.github+json' },
+        signal: AbortSignal.timeout(8000)
+      });
+      if (response.ok) {
+        const release = await response.json();
+        const version = /^v(\d+\.\d+\.\d+)$/.exec(release.tag_name)?.[1];
+        const hasVerifiedAsset = (platformSuffix) => release.assets?.some((asset) =>
+          asset.name === `steelgum-${version}-${platformSuffix}` &&
+          /^sha256:[\da-f]{64}$/i.test(asset.digest));
+        if (version && !release.draft && !release.prerelease &&
+            hasVerifiedAsset('linux-x64.AppImage') && hasVerifiedAsset('windows-x64-setup.exe')) {
+          const widget = document.createElement('script');
+          widget.src = 'https://brumley.info/shared/v1/install-widget.js';
+          const install = document.getElementById('release-install');
+          // The shared widget measures the active tab when it loads.
+          install.hidden = false;
+          widget.addEventListener('load', () => {
+            document.getElementById('source-build').hidden = true;
+          }, { once: true });
+          widget.addEventListener('error', () => { install.hidden = true; }, { once: true });
+          document.head.append(widget);
+        }
+      }
+    } catch {
+      // The source instructions remain available when release status cannot be read.
+    }
+  </script>
+  <script src="https://brumley.info/shared/v1/apps.js" defer></script>
+  <script src="https://brumley.info/shared/v1/other-apps.js" defer></script>
+</body>
+</html>

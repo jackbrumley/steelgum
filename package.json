@@ -1,0 +1,11 @@
+{
+  "name": "steelgum-release-tools",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "release:prepare": "node scripts/release.mjs prepare",
+    "release:notes": "node scripts/release-assets.mjs notes",
+    "release:verify": "node scripts/release.mjs verify",
+    "release:promote": "node scripts/release.mjs promote"
+  }
+}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Steelgum
+Comment=Build and preview Steelgum games
+Exec=steelgum
+Icon=info.brumley.steelgum
+StartupWMClass=info.brumley.steelgum
+Terminal=false
+Categories=Development;

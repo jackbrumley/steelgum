@@ -6,8 +6,10 @@ pub mod pause_menu;
 pub mod project;
 pub mod review;
 pub mod scene_edit;
+mod scene_warnings;
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -41,7 +43,10 @@ impl SceneObject {
 }
 
 #[derive(Debug)]
-pub struct Scene(SceneDocument);
+pub struct Scene {
+    document: SceneDocument,
+    coplanar_overlaps: OnceLock<Vec<[usize; 2]>>,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +76,13 @@ pub enum SceneError {
 }
 
 impl Scene {
+    fn new(document: SceneDocument) -> Self {
+        Self {
+            document,
+            coplanar_overlaps: OnceLock::new(),
+        }
+    }
+
     pub fn from_json(source: &str) -> Result<Self, SceneError> {
         let scene: SceneDocument = serde_json::from_str(source)?;
         if scene.version != SCENE_VERSION {
@@ -97,11 +109,11 @@ impl Scene {
                 return Err(SceneError::InvalidBounds(object.id.clone()));
             }
         }
-        Ok(Self(scene))
+        Ok(Self::new(scene))
     }
 
     pub fn objects(&self) -> &[SceneObject] {
-        &self.0.objects
+        &self.document.objects
     }
 
     pub fn object(&self, id: &str) -> Option<&SceneObject> {
@@ -109,7 +121,7 @@ impl Scene {
     }
 
     pub fn to_json(&self) -> Result<String, SceneError> {
-        Ok(serde_json::to_string_pretty(&self.0)?)
+        Ok(serde_json::to_string_pretty(&self.document)?)
     }
 }
 

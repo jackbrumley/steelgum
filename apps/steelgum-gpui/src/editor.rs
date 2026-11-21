@@ -2,21 +2,18 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::{Result, anyhow, bail};
-use gpui::{AnyElement, Context, PathPromptOptions, Render, Window, div, prelude::*, px, rgb};
-use steelgum::review::{ObjectChanges, SceneReview};
+use gpui::{App, Context, FocusHandle, PathPromptOptions, Window};
+use steelgum::review::SceneReview;
 
-use crate::viewport::{View, Viewport};
+use crate::viewport::Viewport;
+
+mod runner;
+mod workspace;
+
+use runner::{Job, RunState};
+use workspace::Tool;
 
 const ROOM_PATHS: [&str; 2] = ["scenes/room.json", "examples/door-game/scenes/room.json"];
-const SHELL: u32 = 0x131b22;
-const PANEL: u32 = 0x1a2530;
-const BORDER: u32 = 0x344453;
-const TEXT: u32 = 0xe8f1f5;
-const MUTED: u32 = 0xa9bec9;
-const ACCENT: u32 = 0x96dfd5;
-const SELECTED: u32 = 0x28484a;
-const ERROR: u32 = 0xffc2bb;
-
 pub(crate) struct Project {
     name: String,
     source: Option<(PathBuf, PathBuf)>,
@@ -34,11 +31,16 @@ impl Project {
 
     pub fn open(repo: PathBuf, path: PathBuf) -> Result<Self> {
         let review = SceneReview::from_git(&repo, &path)?;
-        Ok(Self {
-            name: format!("{} · {}", repo.display(), path.display()),
+        Ok(Self::loaded(repo, path, review))
+    }
+
+    fn loaded(repo: PathBuf, path: PathBuf, review: SceneReview) -> Self {
+        let name = repo.file_name().unwrap_or(repo.as_os_str());
+        Self {
+            name: name.to_string_lossy().into_owned(),
             source: Some((repo, path)),
             review: Rc::new(review),
-        })
+        }
     }
 }
 
@@ -50,10 +52,19 @@ pub(crate) struct ReviewWindow {
     status: Option<String>,
     loading: bool,
     viewport: Viewport,
+    top_down: bool,
+    menu_open: bool,
+    tool: Option<Tool>,
+    closing_pane: Option<Tool>,
+    search_focus: FocusHandle,
+    workspace_focus: FocusHandle,
+    search: String,
+    release: bool,
+    run_state: RunState,
 }
 
 impl ReviewWindow {
-    pub fn new(project: Project) -> Self {
+    pub fn new(project: Project, cx: &mut App) -> Self {
         let selected = first_selection(&project.review);
         Self {
             project,
@@ -63,11 +74,24 @@ impl ReviewWindow {
             status: None,
             loading: false,
             viewport: Viewport::default(),
+            top_down: false,
+            menu_open: true,
+            tool: Some(Tool::Changes),
+            closing_pane: None,
+            search_focus: cx.focus_handle().tab_stop(true),
+            workspace_focus: cx.focus_handle(),
+            search: String::new(),
+            release: false,
+            run_state: RunState::Idle,
         }
     }
 
+    pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.workspace_focus.focus(window, cx);
+    }
+
     fn open_folder(&mut self, cx: &mut Context<Self>) {
-        if self.loading {
+        if self.loading || self.run_state.busy() {
             return;
         }
         let picker = cx.prompt_for_paths(PathPromptOptions {
@@ -97,7 +121,13 @@ impl ReviewWindow {
             let _ = this.update(cx, |window, cx| {
                 window.loading = false;
                 match loaded {
-                    Ok(Some((repo, path, review))) => window.apply_loaded(repo, path, review),
+                    Ok(Some((repo, path, review))) => {
+                        window.apply_loaded(repo, path, review);
+                        window.before = false;
+                        window.focus = false;
+                        window.run_state = RunState::Idle;
+                        window.show_tool(Tool::Changes);
+                    }
                     Ok(None) => {}
                     Err(error) => window.status = Some(error.to_string()),
                 }
@@ -138,298 +168,16 @@ impl ReviewWindow {
     }
 
     fn apply_loaded(&mut self, repo: PathBuf, path: PathBuf, review: SceneReview) {
-        if self
-            .selected
-            .as_ref()
-            .is_none_or(|id| !review.changes().iter().any(|item| &item.id == id))
-        {
+        if self.selected.as_ref().is_none_or(|id| {
+            review.before().object(id).is_none() && review.after().object(id).is_none()
+        }) {
             self.selected = first_selection(&review);
         }
         if self.selected.is_none() {
             self.focus = false;
         }
-        self.project = Project {
-            name: format!("{} · {}", repo.display(), path.display()),
-            source: Some((repo, path)),
-            review: Rc::new(review),
-        };
+        self.project = Project::loaded(repo, path, review);
     }
-
-    fn sidebar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let changes = self.project.review.changes();
-        div()
-            .id("changes")
-            .w(px(240.))
-            .flex_none()
-            .border_r_1()
-            .border_color(rgb(BORDER))
-            .bg(rgb(PANEL))
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .overflow_y_scroll()
-            .child(div().text_color(rgb(TEXT)).child("Changes"))
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(rgb(MUTED))
-                    .child(if self.project.source.is_some() {
-                        "HEAD → Working tree"
-                    } else {
-                        "Before → After · example"
-                    }),
-            )
-            .when(changes.is_empty(), |panel| {
-                panel.child(
-                    div()
-                        .text_sm()
-                        .text_color(rgb(MUTED))
-                        .child("No scene changes."),
-                )
-            })
-            .children(changes.iter().enumerate().map(|(index, change)| {
-                let id = change.id.clone();
-                let selected = self.selected.as_deref() == Some(id.as_str());
-                div()
-                    .id(("scene-change", index))
-                    .cursor_pointer()
-                    .rounded_md()
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .bg(rgb(if selected { SELECTED } else { PANEL }))
-                    .hover(|style| style.bg(rgb(SELECTED)))
-                    .child(label(&id))
-                    .child(
-                        div()
-                            .text_sm()
-                            .text_color(rgb(MUTED))
-                            .child(change_kind(change.changes)),
-                    )
-                    .on_click(cx.listener(move |view, _, _, cx| {
-                        view.selected = Some(id.clone());
-                        cx.notify();
-                    }))
-            }))
-            .into_any_element()
-    }
-
-    fn details(&self) -> AnyElement {
-        let Some(id) = self.selected.as_deref() else {
-            return div()
-                .text_sm()
-                .text_color(rgb(MUTED))
-                .child("Select a scene change to compare it.")
-                .into_any_element();
-        };
-        let before = self.project.review.before().object(id);
-        let after = self.project.review.after().object(id);
-        let mut row = div()
-            .flex()
-            .items_center()
-            .gap_3()
-            .text_sm()
-            .child(label(id));
-        match (before, after) {
-            (Some(before), Some(after)) => {
-                if before.color != after.color {
-                    row = row
-                        .child("Colour")
-                        .child(swatch(before.color))
-                        .child("→")
-                        .child(swatch(after.color));
-                } else {
-                    row = row.child(change_kind(
-                        self.project
-                            .review
-                            .changes()
-                            .iter()
-                            .find(|change| change.id == id)
-                            .expect("selection comes from the current change list")
-                            .changes,
-                    ));
-                }
-            }
-            (None, Some(_)) => row = row.child("Added"),
-            (Some(_), None) => row = row.child("Removed"),
-            (None, None) => {}
-        }
-        row.into_any_element()
-    }
-}
-
-impl Render for ReviewWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let view = View {
-            review: self.project.review.clone(),
-            before: self.before,
-            selection: self.selected.clone(),
-            focus: self.focus && self.selected.is_some(),
-        };
-
-        let open = action("open-project", "Open Folder", false)
-            .on_click(cx.listener(|view, _, _, cx| view.open_folder(cx)));
-
-        div()
-            .size_full()
-            .bg(rgb(SHELL))
-            .text_color(rgb(TEXT))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_3()
-                    .px_4()
-                    .py_3()
-                    .border_b_1()
-                    .border_color(rgb(BORDER))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_w_0()
-                            .child(div().text_color(rgb(ACCENT)).child("Steelgum"))
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .truncate()
-                                    .text_color(rgb(MUTED))
-                                    .child(self.project.name.clone()),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .when(self.project.source.is_some(), |actions| {
-                                actions.child(
-                                    action("refresh", "Refresh", false)
-                                        .on_click(cx.listener(|view, _, _, cx| view.refresh(cx))),
-                                )
-                            })
-                            .child(open),
-                    ),
-            )
-            .when(self.loading, |window| {
-                window.child(
-                    div()
-                        .px_4()
-                        .py_1()
-                        .text_sm()
-                        .text_color(rgb(MUTED))
-                        .child("Loading project…"),
-                )
-            })
-            .when_some(self.status.clone(), |window, status| {
-                window.child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .text_sm()
-                        .text_color(rgb(ERROR))
-                        .child(status),
-                )
-            })
-            .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.sidebar(cx))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .px_4()
-                                    .py_2()
-                                    .border_b_1()
-                                    .border_color(rgb(BORDER))
-                                    .child(div().flex_1().child(if self.focus {
-                                        "Object"
-                                    } else {
-                                        "Scene"
-                                    }))
-                                    .child(action("before", "Before", self.before).on_click(
-                                        cx.listener(|view, _, _, cx| {
-                                            view.before = true;
-                                            cx.notify();
-                                        }),
-                                    ))
-                                    .child(action("after", "After", !self.before).on_click(
-                                        cx.listener(|view, _, _, cx| {
-                                            view.before = false;
-                                            cx.notify();
-                                        }),
-                                    ))
-                                    .when(self.selected.is_some(), |controls| {
-                                        controls.child(
-                                            action(
-                                                "focus",
-                                                if self.focus {
-                                                    "Show Room"
-                                                } else {
-                                                    "Focus Selection"
-                                                },
-                                                self.focus,
-                                            )
-                                            .on_click(
-                                                cx.listener(|view, _, _, cx| {
-                                                    view.focus = !view.focus;
-                                                    cx.notify();
-                                                }),
-                                            ),
-                                        )
-                                    }),
-                            )
-                            .child(div().flex_1().min_h_0().child(self.viewport.element(view)))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .justify_between()
-                                    .gap_3()
-                                    .px_4()
-                                    .py_2()
-                                    .border_t_1()
-                                    .border_color(rgb(BORDER))
-                                    .child(self.details())
-                                    .child(
-                                        div()
-                                            .text_sm()
-                                            .text_color(rgb(MUTED))
-                                            .child("Drag to orbit · Scroll to zoom"),
-                                    ),
-                            ),
-                    ),
-            )
-    }
-}
-
-fn action(id: &'static str, text: &'static str, active: bool) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .px_3()
-        .py_1()
-        .rounded_md()
-        .cursor_pointer()
-        .bg(rgb(if active { SELECTED } else { PANEL }))
-        .border_1()
-        .border_color(rgb(BORDER))
-        .hover(|style| style.bg(rgb(SELECTED)))
-        .child(text)
 }
 
 fn first_selection(review: &SceneReview) -> Option<String> {
@@ -460,47 +208,19 @@ fn label(id: &str) -> String {
     if id == "plate" {
         "Pressure plate".into()
     } else {
-        id.replace(['-', '_'], " ")
+        let name = id.replace(['-', '_'], " ");
+        let mut chars = name.chars();
+        chars.next().map_or_else(String::new, |first| {
+            format!("{}{}", first.to_ascii_uppercase(), chars.as_str())
+        })
     }
-}
-
-fn change_kind(changes: ObjectChanges) -> String {
-    match changes {
-        ObjectChanges::Added => "Added".into(),
-        ObjectChanges::Removed => "Removed".into(),
-        ObjectChanges::Modified {
-            color,
-            center,
-            size,
-            solid,
-        } => [
-            (color, "Colour"),
-            (center, "Position"),
-            (size, "Size"),
-            (solid, "Collision"),
-        ]
-        .into_iter()
-        .filter_map(|(changed, label)| changed.then_some(label))
-        .collect::<Vec<_>>()
-        .join(", "),
-    }
-}
-
-fn swatch([r, g, b]: [u8; 3]) -> impl IntoElement {
-    let color = u32::from_be_bytes([0, r, g, b]);
-    div()
-        .flex()
-        .items_center()
-        .gap_2()
-        .child(div().size(px(12.)).rounded_sm().bg(rgb(color)))
-        .child(format!("#{color:06X}"))
 }
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use std::sync::Arc;
 
-    use gpui::{AppContext, HeadlessAppContext, current_headless_renderer, size};
+    use gpui::{AppContext, HeadlessAppContext, Keystroke, current_headless_renderer, px, size};
     use gpui_wgpu::CosmicTextSystem;
 
     use super::*;
@@ -514,8 +234,12 @@ mod tests {
             current_headless_renderer,
         );
         let sample = Project::demo(crate::demo()?);
-        let window = app.open_window(size(px(980.), px(650.)), |_, cx| {
-            cx.new(|_| ReviewWindow::new(sample))
+        let window = app.open_window(size(px(980.), px(650.)), |window, cx| {
+            cx.new(|cx| {
+                let workspace = ReviewWindow::new(sample, cx);
+                workspace.focus(window, cx);
+                workspace
+            })
         })?;
         let after = app.capture_screenshot(window.into())?;
         app.update(|cx| {
@@ -527,11 +251,41 @@ mod tests {
         })?;
         let before = app.capture_screenshot(window.into())?;
 
+        app.update(|cx| {
+            window.update(cx, |view, _, cx| {
+                view.menu_open = false;
+                view.top_down = true;
+                cx.notify();
+            })
+        })?;
+        let top_down = app.capture_screenshot(window.into())?;
+        assert_ne!(before, top_down, "2D should change the displayed frame");
+
+        app.update_window(window.into(), |_, window, cx| {
+            assert!(window.dispatch_keystroke(Keystroke::parse("ctrl-k").unwrap(), cx));
+        })?;
+        let _ = app.capture_screenshot(window.into())?;
+        for key in ["b", "u", "enter"] {
+            app.update_window(window.into(), |_, window, cx| {
+                assert!(window.dispatch_keystroke(Keystroke::parse(key).unwrap(), cx));
+            })?;
+        }
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                assert!(view.menu_open, "search should open the collapsed menu");
+                assert!(
+                    view.tool == Some(Tool::Build),
+                    "search should open the matching tool"
+                );
+            })
+        })?;
+
         if let Some(directory) = std::env::var_os("STEELGUM_SNAPSHOT_DIR") {
             let directory = PathBuf::from(directory);
             std::fs::create_dir_all(&directory)?;
             before.save(directory.join("steelgum-gpui-before.png"))?;
             after.save(directory.join("steelgum-gpui-after.png"))?;
+            top_down.save(directory.join("steelgum-gpui-top-down.png"))?;
         }
         let (blue_before, red_before) = count_plate_pixels(&before);
         let (blue_after, red_after) = count_plate_pixels(&after);

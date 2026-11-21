@@ -7281,6 +7281,7 @@ dependencies = [
  "image",
  "raw-window-handle",
  "steelgum",
+ "tempfile",
  "wgpu",
 ]
 

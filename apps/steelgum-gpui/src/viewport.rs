@@ -16,6 +16,7 @@ pub(crate) struct View {
     pub before: bool,
     pub selection: Option<String>,
     pub focus: bool,
+    pub top_down: bool,
 }
 
 impl View {
@@ -44,6 +45,7 @@ impl Viewport {
         {
             let object_count = view.scene().objects().len();
             let selection = view.selection.as_deref().unwrap_or("None");
+            let projection = if view.top_down { "2D" } else { "3D" };
             let scope = if view.focus {
                 "Focused"
             } else {
@@ -60,7 +62,7 @@ impl Viewport {
                 .text_color(rgb(0xadc1cd))
                 .child("Live Bevy viewport is currently available on Linux and Windows.")
                 .child(format!(
-                    "{scope} · {object_count} objects · Selection: {selection}"
+                    "{projection} · {scope} · {object_count} objects · Selection: {selection}"
                 ))
                 .into_any_element()
         }

@@ -23,13 +23,18 @@ fn main() -> Result<()> {
         let bounds = Bounds::centered(None, size(px(1100.), px(720.)), cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(bounds)),
+            window_min_size: Some(size(px(780.), px(480.))),
             ..Default::default()
         };
         #[cfg(windows)]
         let options = windows::with_wgpu(options);
         if let Err(error) = cx.open_window(options, move |window, cx| {
-            window.set_window_title("Steelgum · Scene Review");
-            cx.new(|_| editor::ReviewWindow::new(project))
+            window.set_window_title("Steelgum");
+            cx.new(|cx| {
+                let workspace = editor::ReviewWindow::new(project, cx);
+                workspace.focus(window, cx);
+                workspace
+            })
         }) {
             *report.borrow_mut() = Some(error);
             cx.quit();

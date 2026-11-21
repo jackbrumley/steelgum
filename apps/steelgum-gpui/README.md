@@ -1,8 +1,7 @@
 # Steelgum desktop review experiment
 
-This source-only experiment opens a GPUI window with a Changes panel and a
-live 3D view of the selected scene revision. The packaged Steelgum application
-has its own executable and release process.
+This source-only GPUI workspace opens directly into the Door Room example.
+The packaged Steelgum application has its own executable and release process.
 
 From the Steelgum checkout, enter this directory and run:
 
@@ -17,8 +16,19 @@ The directory pins Rust 1.99.1. On Debian-based Linux systems, the build uses
 window you need a graphical session and a supported GPU adapter. Use the MSVC
 Rust target and Windows build tools for the Windows experiment.
 
-Select **Pressure plate**, switch **Before** and **After**, and drag to orbit
-the room. Scroll to zoom. **Focus Selection** isolates the selected object.
+- Use the top-left menu button to collapse the tools. **Ctrl+K** opens and
+  focuses **Find a tool**. Type part of a tool name and press **Enter** to
+  open the first match.
+- **Changes** opens the right pane. Select **Pressure plate** and switch
+  between **Before** and **After** to see the colour change. Use **Scene**
+  or **Assets** to browse objects in the selected revision.
+- Drag to orbit in **3D**, scroll to zoom, or choose **2D** for a top-down
+  view. **Focus Object** isolates the selected object. Closing either
+  sidebar gives the viewport more space.
+- **Build Game** opens the build pane. Choose **Debug** or **Release** and
+  click **Build** to compile for the host. **Play** uses the selected profile
+  and opens a separate game window. The bundled example plays the **After**
+  scene. An open Door Game worktree plays the saved scene on disk.
 
 **Open Folder** accepts a Git worktree with `scenes/room.json` or the
 Door Game room in this repository. You can also pass another scene's path
@@ -31,6 +41,11 @@ cargo run --locked -- /path/to/worktree scenes/level.json
 **Refresh** reads the file on disk again and compares it with the same scene
 at the current `HEAD`. Opening or refreshing a scene reads and validates data.
 The Changes panel shows per-object scene differences.
+
+Build and Play currently use `apps/door-game-bevy/Cargo.toml` in the
+Steelgum checkout or opened worktree. Other supported worktrees can still be
+opened for review. Build and Play execute the runner's Cargo project, so use
+them with worktrees you trust.
 
 Steelgum owns the comparison and stable authored IDs. GPUI controls the
 window and passes camera input to the viewport. Bevy draws offscreen on

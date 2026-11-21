@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Result, anyhow};
 use bevy::app::{App as BevyApp, SubApps, TerminalCtrlCHandlerPlugin};
 use bevy::asset::RenderAssetUsages;
-use bevy::camera::RenderTarget;
+use bevy::camera::{RenderTarget, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs as bevy_ecs;
 use bevy::input::InputPlugin;
@@ -165,7 +165,11 @@ impl Renderer {
                 || view.selection != old.selection
                 || view.focus != old.focus
         });
-        if changed || size != self.size || self.orbit != orbit {
+        let projection_changed = self
+            .displayed
+            .as_ref()
+            .is_some_and(|old| old.top_down != view.top_down);
+        if changed || projection_changed || size != self.size || self.orbit != orbit {
             let world = self.apps.main.world_mut();
             if size != self.size {
                 let handle = world.resource::<Target>().0.clone();
@@ -286,7 +290,7 @@ fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
         .filter(|_| view.focus)
         .and_then(|id| view.scene().object(id));
     let target = focused.map_or(Vec3::ZERO, |object| Vec3::from_array(object.center));
-    let scale = focused.map_or(14., |object| Vec3::from_array(object.size).length() * 1.75);
+    let scale = focused.map_or(17., |object| Vec3::from_array(object.size).length() * 1.75);
     let aspect = size[0] as f32 / size[1] as f32;
     let distance = scale * orbit.zoom / aspect.min(1.);
     let direction = Vec3::new(
@@ -294,10 +298,26 @@ fn update_camera(world: &mut World, view: &View, orbit: Orbit, size: [u32; 2]) {
         orbit.pitch.sin(),
         orbit.yaw.cos() * orbit.pitch.cos(),
     );
-    let mut cameras = world.query_filtered::<&mut Transform, With<ReviewCamera>>();
-    for mut camera in cameras.iter_mut(world) {
-        *camera =
-            Transform::from_translation(target + direction * distance).looking_at(target, Vec3::Y);
+    let mut cameras =
+        world.query_filtered::<(&mut Transform, &mut Projection), With<ReviewCamera>>();
+    for (mut camera, mut projection) in cameras.iter_mut(world) {
+        if view.top_down {
+            *camera =
+                Transform::from_translation(target + Vec3::Y * 20.).looking_at(target, Vec3::NEG_Z);
+            *projection = OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical {
+                    viewport_height: distance,
+                },
+                ..OrthographicProjection::default_3d()
+            }
+            .into();
+        } else {
+            *camera = Transform::from_translation(target + direction * distance)
+                .looking_at(target, Vec3::Y);
+            if !matches!(*projection, Projection::Perspective(_)) {
+                *projection = Projection::Perspective(PerspectiveProjection::default());
+            }
+        }
     }
 }
 
@@ -316,6 +336,7 @@ impl Surface {
             self.error.clone(),
             self.orbit.clone(),
         );
+        let top_down = view.top_down;
         let canvas = gpu_canvas(move |gpu| {
             if error.borrow().is_some() {
                 return;
@@ -357,7 +378,7 @@ impl Surface {
                 position,
                 pressed: Some(SurfaceButton::Left),
                 ..
-            } => {
+            } if !top_down => {
                 if let Some(last) = previous.get() {
                     previous.set(Some(position));
                     let mut camera = orbit.get();

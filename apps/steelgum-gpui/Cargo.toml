@@ -15,6 +15,7 @@ unsafe_code = "deny"
 anyhow = "1"
 gpui = { package = "bite-gpui", version = "=1.25.203", default-features = false, features = ["platform"] }
 steelgum = { path = "../../crates/steelgum" }
+tempfile = "3"
 
 [target.'cfg(any(target_os = "linux", windows))'.dependencies]
 bevy = { version = "=0.20.1", default-features = false, features = [

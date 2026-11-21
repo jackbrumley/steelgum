@@ -110,7 +110,6 @@ fn snapshot(root: &Path, app: &Path) -> io::Result<Snapshot> {
         app.join("rust-toolchain.toml"),
         app.join("build.rs"),
         core.join("Cargo.toml"),
-        root.join("examples/door-game/scenes/room.json"),
         app.join("src"),
         core.join("src"),
     ] {

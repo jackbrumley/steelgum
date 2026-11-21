@@ -16,9 +16,11 @@ For automatic rebuilds, run this from the Steelgum repository root:
 cargo dev
 ```
 
-It watches the desktop source, Steelgum core, and bundled demo scene. A
-successful build restarts the window. A compile error leaves the previous
-window open, with diagnostics in the terminal. Press **Ctrl+C** to stop.
+It watches the desktop source and Steelgum core. The previous window
+stays open during the build and restarts once the build succeeds. A
+compile error leaves the previous window open and shows diagnostics in
+the terminal. Scene edits in an open worktree refresh inside the window.
+Press **Ctrl+C** to stop the watcher.
 
 On Linux, the watcher uses `taskset` and `nice` to build at lower priority
 on at most half the available logical CPUs. On a single-CPU system it uses
@@ -80,9 +82,11 @@ relative to the Git worktree root:
 cargo run --locked -- /path/to/worktree scenes/level.json
 ```
 
-**Refresh** reads the file on disk again and compares it with the same scene
-at the current `HEAD`. Opening or refreshing a scene reads and validates data.
-The Changes panel shows per-object scene differences.
+An open worktree refreshes after the scene file or Git `HEAD` changes. The
+viewport keeps its camera and selected object while **Changes** updates.
+An invalid or temporarily missing scene leaves the last valid scene visible
+with an error. The next valid save clears the error. **Refresh** is also
+available to request a fresh read.
 
 Build and Play currently use `apps/door-game-bevy/Cargo.toml` in the
 Steelgum checkout or opened worktree. Other supported worktrees can still be

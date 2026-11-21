@@ -359,6 +359,25 @@ impl ReviewWindow {
                 .selected
                 .as_deref()
                 .is_some_and(|id| view.scene().object(id).is_none());
+        let surface = if selection_missing {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(note("The selected object is missing from this revision."))
+                .into_any_element()
+        } else {
+            let entity = cx.weak_entity();
+            let app = cx.to_async();
+            self.viewport.element(view, move |id| {
+                let entity = entity.clone();
+                app.spawn(async move |cx| {
+                    let _ = entity.update(cx, |view, cx| view.select_from_viewport(id, cx));
+                })
+                .detach();
+            })
+        };
         div()
             .flex()
             .flex_col()
@@ -397,30 +416,31 @@ impl ReviewWindow {
                             }),
                     ),
             )
-            .child(if selection_missing {
+            .child(
                 div()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(note("The selected object is missing from this revision."))
-                    .into_any_element()
-            } else {
-                div()
+                    .relative()
                     .flex_1()
                     .min_h_0()
-                    .child(self.viewport.element(view, {
-                        let entity = cx.weak_entity();
-                        let app = cx.to_async();
-                        move |id| {
-                            let entity = entity.clone();
-                            app.spawn(async move |cx| {
-                                let _ = entity.update(cx, |view, cx| view.select_from_viewport(id, cx));
-                            }).detach();
-                        }
-                    }))
-                    .into_any_element()
-            })
+                    .child(surface)
+                    .when_some(self.live_issue.as_deref(), |viewport, issue| {
+                        viewport.child(
+                            div()
+                                .absolute()
+                                .top_3()
+                                .left_3()
+                                .right_3()
+                                .rounded_md()
+                                .border_1()
+                                .border_color(rgb(BORDER))
+                                .bg(rgb(SHELL))
+                                .p_2()
+                                .text_sm()
+                                .text_color(rgb(ERROR))
+                                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Showing the last valid scene"))
+                                .child(issue.to_owned()),
+                        )
+                    }),
+            )
             .child(
                 bar()
                     .border_b_0()

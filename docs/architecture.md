@@ -83,5 +83,7 @@ The GPUI workspace compares authored scene revisions using stable object IDs.
 Viewport clicks resolve to authored objects through the renderer adapter.
 The review request copies an optional user note, scene path, selected ID,
 resolved Git base commit, and per-object property changes to the clipboard.
-The comparison covers the scene loaded by the workspace. Refresh the project
-to include newer worktree changes.
+The workspace watches the open scene file and Git HEAD, coalesces saves,
+and replaces the comparison after both revisions validate. Failed reads
+leave the last valid comparison in place. Refresh uses the same validation
+path. Worktree changes leave build and play under explicit user control.

@@ -3,15 +3,17 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
-use gpui::{App, Context, FocusHandle, PathPromptOptions, ScrollHandle, Window};
+use gpui::{App, Context, FocusHandle, PathPromptOptions, ScrollHandle, Task, Window};
 use steelgum::review::SceneReview;
 
 use crate::viewport::Viewport;
 
+mod live_refresh;
 mod review_request;
 mod runner;
 mod workspace;
 
+use live_refresh::SourceStamp;
 use review_request::ReviewDraft;
 
 use runner::{Job, RunState};
@@ -21,6 +23,7 @@ const ROOM_PATHS: [&str; 2] = ["scenes/room.json", "examples/door-game/scenes/ro
 pub(crate) struct Project {
     name: String,
     source: Option<(PathBuf, PathBuf)>,
+    initial_stamp: Option<SourceStamp>,
     review: Rc<SceneReview>,
 }
 
@@ -29,21 +32,44 @@ impl Project {
         Self {
             name: "Door Game example".into(),
             source: None,
+            initial_stamp: None,
             review: Rc::new(review),
         }
     }
 
     pub fn open(repo: PathBuf, path: PathBuf) -> Result<Self> {
+        Ok(LoadedProject::read(repo, path)?.into_project())
+    }
+}
+
+struct LoadedProject {
+    repo: PathBuf,
+    path: PathBuf,
+    stamp: SourceStamp,
+    review: SceneReview,
+}
+
+impl LoadedProject {
+    fn read(repo: PathBuf, path: PathBuf) -> Result<Self> {
+        // Observe before reading so an edit during the read is still eligible
+        // for the next live refresh.
+        let stamp = SourceStamp::read(&repo, &path);
         let review = SceneReview::from_git(&repo, &path)?;
-        Ok(Self::loaded(repo, path, review))
+        Ok(Self {
+            repo,
+            path,
+            stamp,
+            review,
+        })
     }
 
-    fn loaded(repo: PathBuf, path: PathBuf, review: SceneReview) -> Self {
-        let name = repo.file_name().unwrap_or(repo.as_os_str());
-        Self {
+    fn into_project(self) -> Project {
+        let name = self.repo.file_name().unwrap_or(self.repo.as_os_str());
+        Project {
             name: name.to_string_lossy().into_owned(),
-            source: Some((repo, path)),
-            review: Rc::new(review),
+            source: Some((self.repo, self.path)),
+            initial_stamp: Some(self.stamp),
+            review: Rc::new(self.review),
         }
     }
 }
@@ -58,6 +84,9 @@ pub(crate) struct ReviewWindow {
     focus: bool,
     status: Option<String>,
     loading: bool,
+    live_refresh: Option<Task<()>>,
+    refresh_requested: bool,
+    live_issue: Option<String>,
     viewport: Viewport,
     viewport_fps: u32,
     top_down: bool,
@@ -75,7 +104,7 @@ impl ReviewWindow {
     pub fn new(project: Project, cx: &mut Context<Self>) -> Self {
         Self::sample_viewport_fps(cx);
         let selected = first_selection(&project.review);
-        Self {
+        let mut window = Self {
             project,
             before: false,
             selected,
@@ -85,6 +114,9 @@ impl ReviewWindow {
             focus: false,
             status: None,
             loading: false,
+            live_refresh: None,
+            refresh_requested: false,
+            live_issue: None,
             viewport: Viewport::default(),
             viewport_fps: 0,
             top_down: false,
@@ -96,7 +128,9 @@ impl ReviewWindow {
             search: String::new(),
             release: false,
             run_state: RunState::Idle,
-        }
+        };
+        window.watch_project(cx);
+        window
     }
 
     fn sample_viewport_fps(cx: &mut Context<Self>) {
@@ -165,8 +199,10 @@ impl ReviewWindow {
             let _ = this.update(cx, |window, cx| {
                 window.loading = false;
                 match loaded {
-                    Ok(Some((repo, path, review))) => {
-                        window.apply_loaded(repo, path, review);
+                    Ok(Some(project)) => {
+                        window.selected = first_selection(&project.review);
+                        window.project = project.into_project();
+                        window.watch_project(cx);
                         window.before = false;
                         window.review_draft = ReviewDraft::default();
                         window.focus = false;
@@ -182,48 +218,6 @@ impl ReviewWindow {
         })
         .detach();
     }
-
-    fn refresh(&mut self, cx: &mut Context<Self>) {
-        if self.loading {
-            return;
-        }
-        let Some((repo, path)) = self.project.source.clone() else {
-            return;
-        };
-        self.loading = true;
-        self.status = None;
-        cx.notify();
-        cx.spawn(async move |this, cx| {
-            let loaded = cx
-                .background_executor()
-                .spawn(async move {
-                    let review = SceneReview::from_git(&repo, &path)?;
-                    Ok::<_, anyhow::Error>((repo, path, review))
-                })
-                .await;
-            let _ = this.update(cx, |window, cx| {
-                window.loading = false;
-                match loaded {
-                    Ok((repo, path, review)) => window.apply_loaded(repo, path, review),
-                    Err(error) => window.status = Some(error.to_string()),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn apply_loaded(&mut self, repo: PathBuf, path: PathBuf, review: SceneReview) {
-        if self.selected.as_ref().is_none_or(|id| {
-            review.before().object(id).is_none() && review.after().object(id).is_none()
-        }) {
-            self.selected = first_selection(&review);
-        }
-        if self.selected.is_none() {
-            self.focus = false;
-        }
-        self.project = Project::loaded(repo, path, review);
-    }
 }
 
 fn first_selection(review: &SceneReview) -> Option<String> {
@@ -235,7 +229,7 @@ fn first_selection(review: &SceneReview) -> Option<String> {
         .map(|change| change.id.clone())
 }
 
-fn open_first_room(repo: PathBuf) -> Result<(PathBuf, PathBuf, SceneReview)> {
+fn open_first_room(repo: PathBuf) -> Result<LoadedProject> {
     let Some(scene) = ROOM_PATHS
         .iter()
         .map(PathBuf::from)
@@ -246,8 +240,7 @@ fn open_first_room(repo: PathBuf) -> Result<(PathBuf, PathBuf, SceneReview)> {
             repo.display()
         );
     };
-    let review = SceneReview::from_git(&repo, &scene)?;
-    Ok((repo, scene, review))
+    LoadedProject::read(repo, scene)
 }
 
 fn label(id: &str) -> String {

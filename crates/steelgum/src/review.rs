@@ -124,9 +124,7 @@ impl SceneReview {
                 source,
             })?;
 
-        let head = git_output(repo, "HEAD", &["rev-parse", "--verify", "HEAD"])?;
-        let head = std::str::from_utf8(head.trim_ascii())
-            .map_err(|_| ReviewError::InvalidGitText("HEAD".into()))?;
+        let head = Self::worktree_head(repo)?;
         let revision = format!("{head}:{git_path}");
         let before = git_output(repo, &revision, &["cat-file", "blob", &revision])?;
         let before =
@@ -135,8 +133,16 @@ impl SceneReview {
             parse_scene(before, "HEAD", scene_path)?,
             parse_scene(&working_text, "working tree", scene_path)?,
         );
-        review.base_revision = Some(head.to_owned());
+        review.base_revision = Some(head);
         Ok(review)
+    }
+
+    /// Resolve the worktree's current Git commit.
+    pub fn worktree_head(repo: &Path) -> Result<String, ReviewError> {
+        let head = git_output(repo, "HEAD", &["rev-parse", "--verify", "HEAD"])?;
+        std::str::from_utf8(head.trim_ascii())
+            .map(str::to_owned)
+            .map_err(|_| ReviewError::InvalidGitText("HEAD".into()))
     }
 
     /// The exact Git commit used as the comparison base, when loaded from a worktree.

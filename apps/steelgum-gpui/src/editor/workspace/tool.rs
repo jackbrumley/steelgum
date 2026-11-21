@@ -17,14 +17,4 @@ impl Tool {
             Self::Build => "Build Game",
         }
     }
-
-    pub(super) fn icon(self) -> &'static str {
-        match self {
-            Self::Objects => "◇",
-            Self::Assets => "▦",
-            Self::Changes => "⑂",
-            Self::Ui => "▣",
-            Self::Build => "⚒",
-        }
-    }
 }

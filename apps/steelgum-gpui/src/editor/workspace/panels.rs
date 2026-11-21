@@ -2,7 +2,8 @@ use gpui::{AnyElement, ClickEvent, Context, Window, div, prelude::*, px, rgb};
 use steelgum::review::ObjectChanges;
 
 use super::{
-    ACCENT, BORDER, ERROR, Job, MUTED, PANEL, ReviewWindow, RunState, SELECTED, Tool, action, note,
+    ACCENT, BORDER, ERROR, Job, MUTED, ReviewWindow, RunState, SELECTED, Tool, action,
+    matches_entry, note, sidebar_action,
 };
 use crate::editor::{label, object_rename::object_label};
 
@@ -16,8 +17,9 @@ const BUILD_PROFILES: [(&str, bool, &str); 2] = [
 ];
 
 impl ReviewWindow {
-    pub(super) fn changes(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn changes_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
         let changes = self.project.review.changes();
+        let query = self.child_query(Tool::Changes);
         div()
             .flex()
             .flex_col()
@@ -31,10 +33,23 @@ impl ReviewWindow {
                 panel.child(note("No scene changes."))
             })
             .children(
-                changes.iter().map(|change| {
-                    self.object_row(&change.id, Some(change_kind(change.changes)), cx)
-                }),
+                changes
+                    .iter()
+                    .filter(|change| {
+                        matches_entry(&self.object_title(&change.id), &change.id, &query)
+                    })
+                    .map(|change| {
+                        self.object_row(&change.id, Some(change_kind(change.changes)), cx)
+                    }),
             )
+            .into_any_element()
+    }
+
+    pub(super) fn change_properties(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
             .child(
                 div()
                     .flex()
@@ -119,7 +134,11 @@ impl ReviewWindow {
         note(object_label(after)).into_any_element()
     }
 
-    pub(super) fn scene_objects(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn scene_objects(
+        &self,
+        max_height: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let scene = self.scene_revision();
         let list = div()
             .id("objects-list")
@@ -128,10 +147,8 @@ impl ReviewWindow {
             .role(gpui::accesskit::Role::List)
             .aria_label("Scene objects")
             .track_scroll(&self.objects_scroll)
-            .min_h_0()
-            .flex_1()
+            .max_h(max_height)
             .overflow_y_scroll()
-            .p_3()
             .flex()
             .flex_col()
             .gap_1()
@@ -139,19 +156,15 @@ impl ReviewWindow {
                 pane.child(div().px_2().child(note("No objects in this revision.")))
             })
             .children(
-                scene
-                    .objects()
-                    .iter()
+                self.visible_objects()
                     .map(|object| self.object_row(&object.id, None, cx)),
             );
         div()
             .flex()
             .flex_col()
-            .flex_1()
-            .min_h_0()
-            .when(self.project.source.is_some(), |pane| {
-                pane.child(self.object_definition_tools(cx))
-            })
+            .ml_3()
+            .gap_1()
+            .when_some(self.add_box_button(cx), |pane, button| pane.child(button))
             .child(list)
             .into_any_element()
     }
@@ -171,7 +184,13 @@ impl ReviewWindow {
                 let [x, y, z] = object.size;
                 pane.child(div().truncate().text_sm().child(object_label(object)))
                     .child(note(format!("{x} × {y} × {z}")))
+                    .when_some(self.rename_field(&object.id, cx), |pane, input| {
+                        pane.child(input)
+                    })
                     .when_some(self.rename_control(cx), |pane, control| pane.child(control))
+                    .when_some(self.open_scene_button(cx), |pane, button| {
+                        pane.child(div().mt_2().child(button))
+                    })
                     .when(
                         self.project
                             .review
@@ -229,63 +248,66 @@ impl ReviewWindow {
         }
     }
 
+    pub(in crate::editor) fn visible_objects(
+        &self,
+    ) -> impl Iterator<Item = &steelgum::SceneObject> {
+        let query = self.child_query(Tool::Objects);
+        self.scene_revision()
+            .objects()
+            .iter()
+            .filter(move |object| matches_entry(&object_label(object), &object.id, &query))
+    }
+
     pub(in crate::editor) fn reveal_selected_object(&self) {
         if self.tool == Some(Tool::Objects)
             && let Some(id) = self.selected.as_deref()
-            && let Some(index) = self
-                .scene_revision()
-                .objects()
-                .iter()
-                .position(|object| object.id == id)
+            && let Some(index) = self.visible_objects().position(|object| object.id == id)
         {
             self.objects_scroll.scroll_to_item(index);
         }
     }
 
-    fn object_row(&self, id: &str, detail: Option<String>, cx: &mut Context<Self>) -> AnyElement {
-        let editable = detail.is_none();
-        let title = self
-            .scene_revision()
+    pub(super) fn object_title(&self, id: &str) -> String {
+        self.scene_revision()
             .object(id)
             .or_else(|| self.project.review.after().object(id))
             .or_else(|| self.project.review.before().object(id))
-            .map_or_else(|| label(id), object_label);
+            .map_or_else(|| label(id), object_label)
+    }
+
+    fn object_row(&self, id: &str, detail: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+        let editable = detail.is_none();
+        let title = self.object_title(id);
         let id = id.to_owned();
-        let active = self.selected.as_deref() == Some(&id);
-        let name_field = editable.then(|| self.rename_field(&id, cx)).flatten();
+        let tool = if editable {
+            Tool::Objects
+        } else {
+            Tool::Changes
+        };
+        let active = self.tool == Some(tool) && self.selected.as_deref() == Some(&id);
         div()
             .id(gpui::SharedString::from(format!("object-{id}")))
             .tab_index(0)
-            .tab_stop(self.tool.is_some())
+            .tab_stop(self.menu_open)
             .role(gpui::accesskit::Role::Button)
             .aria_toggled(if active {
                 gpui::accesskit::Toggled::True
             } else {
                 gpui::accesskit::Toggled::False
             })
-            .focus_visible(|style| style.border_color(rgb(ACCENT)))
-            .border_1()
-            .border_color(rgb(if active { ACCENT } else { PANEL }))
+            .focus_visible(|style| style.underline())
             .cursor_pointer()
             .rounded_md()
             .px_2()
             .py_1()
             .flex()
             .flex_col()
-            .bg(rgb(if active { SELECTED } else { PANEL }))
-            .when(!active, |row| {
-                row.hover(|style| style.bg(rgb(super::TOOLBAR)))
-            })
-            .child(name_field.unwrap_or_else(|| {
-                div()
-                    .truncate()
-                    .text_sm()
-                    .text_color(rgb(if active { ACCENT } else { super::TEXT }))
-                    .child(title)
-                    .into_any_element()
-            }))
+            .when(active, |row| row.bg(rgb(SELECTED)).text_color(rgb(ACCENT)))
+            .hover(|style| style.text_color(rgb(ACCENT)))
+            .child(div().truncate().text_sm().child(title))
             .when_some(detail, |row, detail| row.child(note(detail)))
             .on_click(cx.listener(move |view, _: &ClickEvent, window, cx| {
+                view.show_tool(tool);
                 view.select_object(id.clone(), cx);
                 if editable {
                     view.objects_focus.focus(window, cx);
@@ -302,13 +324,13 @@ impl ReviewWindow {
                     .child(div().flex().gap_2().children(
                         BUILD_PROFILES.into_iter().enumerate().map(
                             |(index, (title, release, hint))| {
-                                action(title, title, self.release == release)
+                                sidebar_action(title, title, self.release == release)
                                     .track_focus(&self.build_profile_focus[index])
-                                    .tab_stop(self.tool == Some(Tool::Build))
+                                    .tab_stop(self.expanded_tool == Some(Tool::Build))
                                     .aria_description(hint)
                                     .flex_1()
                                     .on_hover(cx.listener(move |view, hovered, _, cx| {
-                                        if view.tool != Some(Tool::Build) {
+                                        if view.expanded_tool != Some(Tool::Build) {
                                             return;
                                         }
                                         if *hovered {
@@ -328,7 +350,7 @@ impl ReviewWindow {
                         ),
                     ))
                     .child(
-                        action("run-build", "Build", false)
+                        sidebar_action("run-build", "Build", false)
                             .on_click(cx.listener(|view, _, _, cx| view.run_game(Job::Build, cx))),
                     );
         } else if !self.project.can_run() {
@@ -345,7 +367,7 @@ impl ReviewWindow {
                 "Stop Play"
             };
             pane = pane.child(
-                action("stop-job", title, false)
+                sidebar_action("stop-job", title, false)
                     .on_click(cx.listener(|view, _, _, cx| view.cancel_job(cx))),
             );
         }
@@ -370,7 +392,7 @@ impl ReviewWindow {
     }
 
     pub(super) fn build_profile_hint(&self, window: &Window) -> Option<&'static str> {
-        if self.tool != Some(Tool::Build) || !self.project.can_build() {
+        if self.expanded_tool != Some(Tool::Build) || !self.menu_open || !self.project.can_build() {
             return None;
         }
         let index = if window.last_input_was_keyboard() {

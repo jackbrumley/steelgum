@@ -116,6 +116,13 @@ show each screen and what its button does.
 **Objects → Add Box** appends a unit box near the viewport target in the
 working scene and selects it on refresh. It keeps the source formatting
 for existing objects and rejects writes against stale scene contents.
+Assets and scene changes also open their lists on the left. The right
+pane displays the selected item's properties. Sidebar search matches
+object and screen names and IDs, asset paths, and changed objects.
+**Import Asset** copies
+a chosen file into the project's assets folder and rejects an existing
+filename. The properties footer can delete a selected screen, object, or
+asset after confirmation.
 
 Scene names are optional display labels. Renaming uses the loaded worktree
 bytes to detect stale edits and writes a validated scene atomically. IDs

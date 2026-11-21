@@ -9,13 +9,18 @@ use gpui::{
 };
 use image::{ImageReader, Limits};
 
-use super::workspace::{ACCENT, BORDER, SHELL, action, note};
-use super::{Project, ReviewWindow};
+use steelgum::project::{ProjectManifest, resolve_project_path};
+
+use super::workspace::{
+    ACCENT, SELECTED, SHELL, create_action, matches_entry, note, sidebar_action,
+};
+use super::{Project, ReviewWindow, Tool};
 
 #[derive(Default)]
 pub(super) struct AssetBrowser {
     generation: u64,
     scanning: bool,
+    importing: bool,
     listing: Option<AssetListing>,
     selected: Option<PathBuf>,
     preview: Option<Result<Preview, String>>,
@@ -55,9 +60,14 @@ impl Project {
 
 impl ReviewWindow {
     pub(super) fn refresh_assets(&mut self, cx: &mut Context<Self>) {
-        let previous_selection = self.assets.selected.take();
+        let previous_selection = self
+            .assets
+            .selected
+            .take()
+            .filter(|_| self.tool == Some(Tool::Assets));
         self.assets = AssetBrowser {
             generation: self.assets.generation.wrapping_add(1),
+            importing: self.assets.importing,
             ..AssetBrowser::default()
         };
         let (Some(source), Some(directory)) =
@@ -86,12 +96,13 @@ impl ReviewWindow {
                 view.assets.scanning = false;
                 match result {
                     Ok(listing) => {
-                        let selected = previous_selection
-                            .filter(|path| listing.files.contains(path))
-                            .or_else(|| listing.files.first().cloned());
+                        let selected =
+                            previous_selection.filter(|path| listing.files.contains(path));
                         view.assets.listing = Some(listing);
                         if let Some(path) = selected {
                             view.preview_asset(path, cx);
+                        } else if view.tool == Some(Tool::Assets) {
+                            view.close_properties();
                         }
                     }
                     Err(error) => view.assets.error = Some(error),
@@ -102,7 +113,7 @@ impl ReviewWindow {
         .detach();
     }
 
-    fn preview_asset(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    pub(super) fn preview_asset(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let (Some(source), Some(listing)) = (self.project.source.clone(), &self.assets.listing)
         else {
             return;
@@ -132,64 +143,201 @@ impl ReviewWindow {
         .detach();
     }
 
-    pub(super) fn assets_panel(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn asset_paths(&self) -> &[PathBuf] {
+        self.assets
+            .listing
+            .as_ref()
+            .map_or(&[], |listing| &listing.files)
+    }
+
+    pub(super) fn load_assets_for_search(&mut self, cx: &mut Context<Self>) {
+        if self.assets.listing.is_none()
+            && !self.assets.scanning
+            && !self.assets.importing
+            && self.assets.error.is_none()
+            && self.project.assets_root().is_some()
+        {
+            self.refresh_assets(cx);
+        }
+    }
+
+    pub(super) fn assets_navigation(
+        &self,
+        max_height: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let assets = &self.assets;
+        let query = self.child_query(Tool::Assets);
         div()
             .flex()
             .flex_col()
             .gap_2()
+            .ml_3()
+            .when(self.project.source.is_some(), |pane| {
+                pane.child(
+                    create_action("import-asset", "+ Import Asset")
+                        .tab_stop(self.menu_open)
+                        .on_click(cx.listener(|view, _, _, cx| view.import_asset(cx))),
+                )
+            })
             .child(
-                action("refresh-assets", "Refresh assets", false)
+                sidebar_action("refresh-assets", "Refresh", false)
+                    .tab_stop(self.menu_open)
                     .on_click(cx.listener(|view, _, _, cx| view.refresh_assets(cx))),
             )
-            .when(assets.scanning, |pane| pane.child(note("Loading assets…")))
-            .when_some(assets.error.as_ref(), |pane, error| {
-                pane.child(note(error.clone()))
+            .when(assets.importing, |pane| {
+                pane.child(note("Importing asset…"))
             })
-            .when(
-                !assets.scanning && assets.error.is_none() && assets.listing.is_none(),
-                |pane| {
-                    pane.child(note(
-                        "Open a game with an assets folder to browse its files.",
-                    ))
-                },
-            )
-            .when_some(assets.listing.as_ref(), |pane, listing| {
-                pane.when(listing.files.is_empty(), |pane| {
-                    pane.child(note("No asset files found."))
-                })
-                .when(assets.selected.is_some(), |pane| {
-                    pane.child(assets.preview_panel())
-                })
-                .children(listing.files.iter().map(|path| {
-                    let id: SharedString = format!("asset-{}", path.display()).into();
-                    let active = assets.selected.as_ref() == Some(path);
-                    let path = path.clone();
-                    div()
-                        .id(id)
-                        .tab_stop(true)
-                        .role(gpui::accesskit::Role::Button)
-                        .aria_toggled(if active {
-                            gpui::accesskit::Toggled::True
-                        } else {
-                            gpui::accesskit::Toggled::False
+            .child(
+                div()
+                    .id("asset-files")
+                    .max_h(max_height)
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .when(assets.scanning, |pane| pane.child(note("Loading assets…")))
+                    .when_some(assets.error.as_ref(), |pane, error| {
+                        pane.child(note(error.clone()))
+                    })
+                    .when(
+                        !assets.scanning && assets.error.is_none() && assets.listing.is_none(),
+                        |pane| {
+                            pane.child(note(
+                                "Open a game with an assets folder to browse its files.",
+                            ))
+                        },
+                    )
+                    .when_some(assets.listing.as_ref(), |pane, listing| {
+                        pane.when(listing.files.is_empty(), |pane| {
+                            pane.child(note("No asset files found."))
                         })
-                        .border_1()
-                        .border_color(rgb(if active { ACCENT } else { BORDER }))
-                        .bg(rgb(SHELL))
-                        .rounded_md()
-                        .py_1()
-                        .px_2()
-                        .text_sm()
-                        .truncate()
-                        .cursor_pointer()
-                        .child(path.display().to_string())
-                        .on_click(
-                            cx.listener(move |view, _, _, cx| view.preview_asset(path.clone(), cx)),
+                        .children(
+                            listing
+                                .files
+                                .iter()
+                                .filter(|path| matches_entry(&path.to_string_lossy(), "", &query))
+                                .map(|path| {
+                                    let id: SharedString =
+                                        format!("asset-{}", path.display()).into();
+                                    let active = self.tool == Some(Tool::Assets)
+                                        && assets.selected.as_ref() == Some(path);
+                                    let path = path.clone();
+                                    div()
+                                        .id(id)
+                                        .tab_index(0)
+                                        .tab_stop(self.menu_open)
+                                        .role(gpui::accesskit::Role::Button)
+                                        .aria_toggled(if active {
+                                            gpui::accesskit::Toggled::True
+                                        } else {
+                                            gpui::accesskit::Toggled::False
+                                        })
+                                        .when(active, |row| {
+                                            row.bg(rgb(SELECTED)).text_color(rgb(ACCENT))
+                                        })
+                                        .hover(|style| style.text_color(rgb(ACCENT)))
+                                        .focus_visible(|style| style.underline())
+                                        .rounded_md()
+                                        .py_1()
+                                        .px_2()
+                                        .text_sm()
+                                        .truncate()
+                                        .cursor_pointer()
+                                        .child(path.display().to_string())
+                                        .on_click(cx.listener(move |view, _, _, cx| {
+                                            view.show_tool(Tool::Assets);
+                                            view.preview_asset(path.clone(), cx);
+                                        }))
+                                }),
                         )
-                }))
-            })
+                    }),
+            )
             .into_any_element()
+    }
+
+    pub(super) fn asset_properties(&self) -> AnyElement {
+        let Some(path) = self.assets.selected.as_deref() else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_sm().child(path.display().to_string()))
+            .child(self.assets.preview_panel())
+            .into_any_element()
+    }
+
+    pub(super) fn selected_asset(&self) -> Option<(&Path, &Path)> {
+        Some((
+            self.assets.listing.as_ref()?.directory.as_path(),
+            self.assets.selected.as_deref()?,
+        ))
+    }
+
+    pub(super) fn importing_asset(&self) -> bool {
+        self.assets.importing
+    }
+
+    fn import_asset(&mut self, cx: &mut Context<Self>) {
+        if self.loading || self.assets.importing {
+            return;
+        }
+        let Some((root, scene)) = self.project.source.clone() else {
+            return;
+        };
+        let picker = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Import an asset".into()),
+        });
+        self.assets.importing = true;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let result = match picker.await {
+                Ok(Ok(Some(mut paths))) => match paths.pop() {
+                    Some(path) => {
+                        let repo = root.clone();
+                        cx.background_executor()
+                            .spawn(async move {
+                                let name = copy_asset(&repo, &path)?;
+                                let directory = asset_directory(&repo)?;
+                                Ok::<_, anyhow::Error>((
+                                    name,
+                                    AssetListing::read(&repo, &directory)?,
+                                ))
+                            })
+                            .await
+                            .map(Some)
+                    }
+                    None => Ok(None),
+                },
+                Ok(Ok(None)) => Ok(None),
+                Ok(Err(error)) => Err(error),
+                Err(error) => Err(error.into()),
+            };
+            let _ = this.update(cx, |view, cx| {
+                if view.project.source.as_ref() != Some(&(root, scene)) {
+                    return;
+                }
+                view.assets.importing = false;
+                match result {
+                    Ok(Some((path, listing))) => {
+                        view.assets.listing = Some(listing);
+                        if view.expanded_tool == Some(Tool::Assets) {
+                            view.show_tool(Tool::Assets);
+                            view.preview_asset(path, cx);
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => view.assets.error = Some(format!("{error:#}")),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 
@@ -261,6 +409,63 @@ fn list_files(root: &Path, directory: &Path, files: &mut Vec<PathBuf>) -> Result
     Ok(())
 }
 
+fn asset_directory(repo: &Path) -> Result<PathBuf> {
+    let relative = ProjectManifest::discover(repo)?
+        .and_then(|project| project.assets)
+        .unwrap_or_else(|| PathBuf::from("assets"));
+    let root = repo.canonicalize()?;
+    let mut directory = root.clone();
+    for component in relative.components() {
+        directory.push(component);
+        if !directory.exists() {
+            match fs::create_dir(&directory) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        directory = directory.canonicalize()?;
+        ensure!(
+            directory.starts_with(&root),
+            "The assets folder resolves outside the project."
+        );
+    }
+    Ok(resolve_project_path(repo, &relative)?)
+}
+
+fn copy_asset(repo: &Path, source: &Path) -> Result<PathBuf> {
+    let name = source.file_name().context("The asset needs a file name")?;
+    ensure!(
+        !name.to_string_lossy().starts_with('.'),
+        "Choose a file with a visible name."
+    );
+    ensure!(source.metadata()?.is_file(), "Choose an asset file.");
+    let directory = asset_directory(repo)?;
+    let mut file = fs::File::open(source)?;
+    let mut incoming = tempfile::NamedTempFile::new_in(&directory)?;
+    std::io::copy(&mut file, &mut incoming)?;
+    incoming.as_file().sync_all()?;
+    incoming
+        .persist_noclobber(directory.join(name))
+        .with_context(|| format!("Could not import {}", source.display()))?;
+    Ok(PathBuf::from(name))
+}
+
+pub(super) fn remove_asset(repo: &Path, directory: &Path, relative: &Path) -> Result<()> {
+    let requested = resolve_project_path(directory, relative)?;
+    let root = repo.canonicalize()?;
+    ensure!(
+        requested.starts_with(root),
+        "The asset resolves outside the project."
+    );
+    let path = directory.join(relative);
+    ensure!(
+        fs::symlink_metadata(&path)?.is_file(),
+        "The asset is no longer a regular file."
+    );
+    fs::remove_file(&path).with_context(|| format!("Could not remove {}", relative.display()))
+}
+
 impl Preview {
     fn read(directory: &Path, relative: &Path) -> Result<Self> {
         let path = directory
@@ -311,6 +516,23 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn imports_and_removes_a_file_without_overwriting_an_existing_asset() -> Result<()> {
+        let source = tempfile::tempdir()?;
+        let project = tempfile::tempdir()?;
+        let file = source.path().join("mesh.txt");
+        fs::write(&file, "original")?;
+        let path = copy_asset(project.path(), &file)?;
+        let assets = project.path().join("assets");
+        fs::write(&file, "replacement")?;
+        assert!(copy_asset(project.path(), &file).is_err());
+        assert_eq!(fs::read_to_string(assets.join(&path))?, "original");
+        remove_asset(project.path(), &assets, &path)?;
+        assert!(!assets.join(&path).exists());
+        assert!(file.exists());
+        Ok(())
+    }
 
     #[test]
     fn lists_and_previews_nested_project_textures() -> Result<()> {

@@ -12,6 +12,7 @@ pub(crate) mod agent;
 mod assets;
 mod bridge;
 mod definitions;
+mod deletion;
 mod live_refresh;
 mod object_rename;
 mod pause_menu;
@@ -125,6 +126,7 @@ pub(crate) struct ReviewWindow {
     rename_focus: FocusHandle,
     pause_menu: pause_menu::MenuEditor,
     definitions: definitions::DefinitionTools,
+    pending_deletion: Option<deletion::DeleteTarget>,
     objects_focus: FocusHandle,
     review_focus: FocusHandle,
     objects_scroll: ScrollHandle,
@@ -139,6 +141,7 @@ pub(crate) struct ReviewWindow {
     viewport_fps: u32,
     top_down: bool,
     menu_open: bool,
+    expanded_tool: Option<Tool>,
     tool: Option<Tool>,
     closing_pane: Option<Tool>,
     search_focus: FocusHandle,
@@ -166,6 +169,7 @@ impl ReviewWindow {
             rename_focus: cx.focus_handle(),
             pause_menu: pause_menu::MenuEditor::new(cx),
             definitions: Default::default(),
+            pending_deletion: None,
             objects_focus: cx.focus_handle(),
             review_focus: cx.focus_handle().tab_stop(true),
             objects_scroll: ScrollHandle::new(),
@@ -180,6 +184,7 @@ impl ReviewWindow {
             viewport_fps: 0,
             top_down: false,
             menu_open: true,
+            expanded_tool: None,
             tool: None,
             closing_pane: None,
             search_focus: cx.focus_handle().tab_stop(true),
@@ -250,6 +255,7 @@ impl ReviewWindow {
             || self.run_state.busy()
             || self.pause_menu.saving()
             || self.definitions.writing
+            || self.importing_asset()
         {
             return;
         }
@@ -293,10 +299,13 @@ impl ReviewWindow {
                         window.rename = None;
                         window.pause_menu.clear();
                         window.definitions = Default::default();
+                        window.pending_deletion = None;
                         window.assets = Default::default();
                         window.focus = false;
                         window.viewport.reset_pan();
                         window.run_state = RunState::Idle;
+                        window.expanded_tool = None;
+                        window.search.clear();
                         window.tool = None;
                         window.closing_pane = None;
                     }
@@ -391,7 +400,7 @@ mod tests {
         })?;
         let assets = app.capture_screenshot(window.into())?;
         app.update_window(window.into(), |_, window, cx| {
-            click(window, cx, point(px(815.), px(131.)));
+            click(window, cx, point(px(90.), px(170.)));
         })?;
         let selected = app.capture_screenshot(window.into())?;
         app.update(|cx| {
@@ -480,7 +489,7 @@ mod tests {
             window.update(cx, |view, _, _| {
                 assert!(view.menu_open, "search should open the collapsed menu");
                 assert!(
-                    view.tool == Some(Tool::Build),
+                    view.expanded_tool == Some(Tool::Build),
                     "search should open the matching tool"
                 );
             })

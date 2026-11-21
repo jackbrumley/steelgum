@@ -17,28 +17,39 @@ pub(super) const BORDER: u32 = 0x343b4a;
 pub(super) const TEXT: u32 = 0xeef1f7;
 pub(super) const MUTED: u32 = 0xaab4c6;
 pub(super) const ACCENT: u32 = 0xbab5ff;
-const SELECTED: u32 = 0x353451;
+pub(super) const SELECTED: u32 = 0x353451;
 const ERROR: u32 = 0xffb5b4;
 const PANE_WIDTH: f32 = 258.;
 
 impl ReviewWindow {
     pub(super) fn show_tool(&mut self, tool: Tool) {
-        if self.tool != Some(tool) {
-            self.hovered_build_profile = None;
+        self.expand_tool(Some(tool));
+        if tool != Tool::Build {
+            self.tool = Some(tool);
+            self.closing_pane = None;
+            self.reveal_selected_object();
         }
-        self.definitions.ui_expanded = tool == Tool::Ui;
-        self.tool = Some(tool);
-        self.closing_pane = None;
-        self.reveal_selected_object();
+    }
+
+    pub(super) fn close_properties(&mut self) {
+        self.pending_deletion = None;
+        if let Some(tool) = self.tool.take() {
+            self.closing_pane = Some(tool);
+        }
+    }
+
+    pub(super) fn expand_tool(&mut self, tool: Option<Tool>) {
+        if self.expanded_tool != tool {
+            self.hovered_build_profile = None;
+            self.close_properties();
+            self.expanded_tool = tool;
+        }
     }
 
     fn activate_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
-        if tool == Tool::Ui {
-            self.toggle_ui_section();
-        } else {
-            self.show_tool(tool);
-        }
-        if tool == Tool::Assets {
+        let expand = (self.expanded_tool != Some(tool)).then_some(tool);
+        self.expand_tool(expand);
+        if expand == Some(Tool::Assets) {
             self.refresh_assets(cx);
         }
         cx.notify();
@@ -51,9 +62,11 @@ impl ReviewWindow {
             .changes()
             .iter()
             .any(|change| change.id == id);
-        if self.tool != Some(Tool::Changes) || !changed {
-            self.show_tool(Tool::Objects);
-        }
+        self.show_tool(if self.expanded_tool == Some(Tool::Changes) && changed {
+            Tool::Changes
+        } else {
+            Tool::Objects
+        });
         self.select_object(id, cx);
     }
 
@@ -81,8 +94,7 @@ impl ReviewWindow {
         ]
         .into_iter()
         .filter(move |tool| {
-            tool.label().to_lowercase().contains(&query)
-                || (*tool == Tool::Ui && self.screen_matches(&query))
+            tool.label().to_lowercase().contains(&query) || self.has_nested_match(*tool, &query)
         })
     }
 
@@ -117,7 +129,7 @@ impl ReviewWindow {
                 "enter" => {
                     let first = self.matching_tools().next();
                     if let Some(tool) = first {
-                        self.activate_tool(tool, cx);
+                        self.activate_search_result(tool, cx);
                         self.workspace_focus.focus(window, cx);
                     }
                 }
@@ -134,6 +146,9 @@ impl ReviewWindow {
                     }
                 }
                 _ => return,
+            }
+            if !self.search.trim().is_empty() {
+                self.load_assets_for_search(cx);
             }
             cx.notify();
         } else {
@@ -189,12 +204,16 @@ impl ReviewWindow {
                     .on_click(cx.listener(|view, _, window, cx| view.focus_search(window, cx))),
             )
             .child(
-                action("build-game", "Build Game", self.tool == Some(Tool::Build)).on_click(
-                    cx.listener(|view, _, _, cx| {
-                        view.show_tool(Tool::Build);
-                        cx.notify();
-                    }),
-                ),
+                action(
+                    "build-game",
+                    "Build Game",
+                    self.expanded_tool == Some(Tool::Build),
+                )
+                .on_click(cx.listener(|view, _, _, cx| {
+                    view.menu_open = true;
+                    view.show_tool(Tool::Build);
+                    cx.notify();
+                })),
             )
             .child(
                 control("play", if playing { "■  Stop" } else { "▶  Play" }, playing)
@@ -250,23 +269,20 @@ impl ReviewWindow {
                                 .aria_label("Close tool pane")
                                 .tab_stop(self.tool.is_some())
                                 .on_click(cx.listener(|view, _, window, cx| {
-                                    view.closing_pane = view.tool.take();
-                                    view.hovered_build_profile = None;
+                                    view.close_properties();
                                     view.workspace_focus.focus(window, cx);
                                     cx.notify();
                                 })),
                         ),
                 )
                 .child(match tool {
-                    Tool::Objects => self.scene_objects(cx),
-                    Tool::Assets => scroll(self.assets_panel(cx)),
-                    Tool::Changes => scroll(self.changes(cx)),
+                    Tool::Objects => scroll(self.object_details(cx)),
+                    Tool::Assets => scroll(self.asset_properties()),
+                    Tool::Changes => scroll(self.change_properties(cx)),
                     Tool::Ui => scroll(self.screen_properties(window, cx)),
-                    Tool::Build => scroll(self.build(cx)),
+                    Tool::Build => unreachable!("build controls are only in navigation"),
                 })
-                .when(tool == Tool::Objects, |pane| {
-                    pane.child(self.object_details(cx))
-                })
+                .when_some(self.deletion_footer(cx), |pane, footer| pane.child(footer))
             });
         slide("tool-pane", PANE_WIDTH, self.tool.is_some(), content)
     }
@@ -428,14 +444,17 @@ impl Render for ReviewWindow {
             .when_some(self.status.as_deref(), |app, status| {
                 app.child(status_line(status, true))
             })
-            .when(self.tool != Some(Tool::Build), |app| {
-                app.when_some(self.run_state.message(), |app, status| {
-                    app.child(status_line(
-                        self.job_progress.as_deref().unwrap_or(status),
-                        matches!(self.run_state, RunState::Finished(Err(_))),
-                    ))
-                })
-            })
+            .when(
+                self.expanded_tool != Some(Tool::Build) || !self.menu_open,
+                |app| {
+                    app.when_some(self.run_state.message(), |app, status| {
+                        app.child(status_line(
+                            self.job_progress.as_deref().unwrap_or(status),
+                            matches!(self.run_state, RunState::Finished(Err(_))),
+                        ))
+                    })
+                },
+            )
             .child(
                 div()
                     .flex()
@@ -475,15 +494,36 @@ fn bar() -> Div {
         .border_color(rgb(BORDER))
 }
 
-pub(super) fn action(
-    id: &'static str,
-    text: impl Into<gpui::SharedString>,
-    active: bool,
-) -> Stateful<Div> {
-    control(id, text, active).hover(|style| style.bg(rgb(SELECTED)))
+pub(super) fn action(id: &'static str, content: impl IntoElement, active: bool) -> Stateful<Div> {
+    control(id, content, active).hover(|style| style.bg(rgb(SELECTED)))
 }
 
-fn control(id: &'static str, text: impl Into<gpui::SharedString>, active: bool) -> Stateful<Div> {
+pub(super) fn sidebar_action(
+    id: &'static str,
+    label: impl IntoElement,
+    selected: bool,
+) -> Stateful<Div> {
+    control(id, label, selected)
+        .border_0()
+        .justify_start()
+        .bg(if selected {
+            rgb(SELECTED)
+        } else {
+            gpui::rgba(0)
+        })
+        .hover(|style| style.text_color(rgb(ACCENT)))
+        .focus_visible(|style| style.underline())
+}
+
+pub(super) fn create_action(id: &'static str, label: &'static str) -> Stateful<Div> {
+    sidebar_action(id, label, false).text_color(rgb(ACCENT))
+}
+
+pub(super) fn matches_entry(name: &str, id: &str, query: &str) -> bool {
+    name.to_lowercase().contains(query) || id.to_lowercase().contains(query)
+}
+
+pub(super) fn control(id: &'static str, content: impl IntoElement, active: bool) -> Stateful<Div> {
     div()
         .id(id)
         .tab_index(0)
@@ -502,7 +542,7 @@ fn control(id: &'static str, text: impl Into<gpui::SharedString>, active: bool) 
         .text_color(rgb(if active { ACCENT } else { TEXT }))
         .border_1()
         .border_color(rgb(BORDER))
-        .child(text.into())
+        .child(content)
 }
 
 fn slide(id: &'static str, width: f32, open: bool, content: Div) -> AnyElement {

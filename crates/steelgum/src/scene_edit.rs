@@ -90,6 +90,30 @@ pub fn add_box(
     })
 }
 
+/// Remove an object from the reviewed working-tree scene.
+pub fn delete_object(
+    worktree: &Path,
+    scene_path: &Path,
+    expected: &str,
+    id: &str,
+) -> Result<(), SceneEditError> {
+    edit_scene(worktree, scene_path, expected, |source| {
+        let scene = Scene::from_json(source)?;
+        let index = scene
+            .objects()
+            .iter()
+            .position(|object| object.id == id)
+            .ok_or_else(|| SceneEditError::MissingObject(id.into()))?;
+        let layout: ObjectLayout<'_> = serde_json::from_str(source).map_err(SceneError::from)?;
+        let object = layout.objects[index].get();
+        let start = object.as_ptr().addr() - source.as_ptr().addr();
+        Ok((
+            crate::file_edit::remove_json(source, start, start + object.len()),
+            (),
+        ))
+    })
+}
+
 fn box_center(scene: &Scene, target: [f32; 3]) -> Option<[f32; 3]> {
     if !target.iter().all(|coordinate| coordinate.is_finite()) {
         return None;
@@ -259,6 +283,17 @@ mod tests {
         let scene = Scene::from_json(&std::fs::read_to_string(root.join(path)).unwrap()).unwrap();
         assert_ne!(first, second);
         assert_ne!(scene.object(&second).unwrap().center, [6., 0.5, 2.]);
+        let current = std::fs::read_to_string(root.join(path)).unwrap();
+        assert!(matches!(
+            delete_object(root, path, ORIGINAL, &first),
+            Err(SceneEditError::Stale)
+        ));
+        delete_object(root, path, &current, &first).unwrap();
+        let current = std::fs::read_to_string(root.join(path)).unwrap();
+        let scene = Scene::from_json(&current).unwrap();
+        assert!(scene.object(&first).is_none());
+        assert!(scene.object(&second).is_some());
+        assert!(scene.object("plate").is_some());
     }
 
     #[test]

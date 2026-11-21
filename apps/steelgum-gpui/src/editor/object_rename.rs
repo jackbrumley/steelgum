@@ -132,7 +132,7 @@ impl ReviewWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.tool != Some(Tool::Objects) {
+        if self.expanded_tool != Some(Tool::Objects) {
             return false;
         }
         let stroke = &event.keystroke;
@@ -148,13 +148,12 @@ impl ReviewWindow {
             return false;
         }
         if stroke.key == "f2" {
-            return self.begin_rename(window, cx);
+            return self.tool == Some(Tool::Objects) && self.begin_rename(window, cx);
         }
         if !self.objects_focus.contains_focused(window, cx) {
             return false;
         }
-        let scene = self.scene_revision();
-        let objects = scene.objects();
+        let objects: Vec<_> = self.visible_objects().collect();
         if objects.is_empty() {
             return false;
         }
@@ -169,7 +168,9 @@ impl ReviewWindow {
             "end" => objects.len() - 1,
             _ => return false,
         };
-        self.select_object(objects[next].id.clone(), cx);
+        let id = objects[next].id.clone();
+        self.show_tool(Tool::Objects);
+        self.select_object(id, cx);
         self.objects_focus.focus(window, cx);
         true
     }

@@ -172,7 +172,8 @@ impl ReviewWindow {
                 let new_assets = manifest
                     .as_ref()
                     .and_then(|project| project.assets.as_ref());
-                let refresh_assets = self.tool == Some(Tool::Assets) && old_assets != new_assets;
+                let refresh_assets =
+                    self.expanded_tool == Some(Tool::Assets) && old_assets != new_assets;
                 if let Some((repo, _)) = &self.project.source {
                     self.project.name = Project::name_for(repo, manifest.as_ref());
                 }

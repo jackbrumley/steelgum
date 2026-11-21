@@ -4,7 +4,7 @@ use steelgum::{
     scene_edit::add_box,
 };
 
-use super::workspace::{action, note};
+use super::workspace::{action, create_action, matches_entry, note, sidebar_action};
 use super::{ReviewWindow, Tool};
 
 const PAUSE_MENU: &str = "pause-menu";
@@ -14,7 +14,6 @@ pub(super) struct DefinitionTools {
     screen: Option<String>,
     created_object: Option<String>,
     pub(super) writing: bool,
-    pub(super) ui_expanded: bool,
 }
 
 impl ReviewWindow {
@@ -40,14 +39,6 @@ impl ReviewWindow {
             })
     }
 
-    pub(super) fn toggle_ui_section(&mut self) {
-        self.definitions.ui_expanded = !self.definitions.ui_expanded;
-        if self.tool.is_some() {
-            self.closing_pane = self.tool.take();
-            self.hovered_build_profile = None;
-        }
-    }
-
     pub(super) fn select_screen(&mut self, id: String) {
         self.definitions.screen = Some(id);
         self.show_tool(Tool::Ui);
@@ -58,7 +49,7 @@ impl ReviewWindow {
             .map_or("Pause Menu", |screen| screen.title.as_str())
     }
 
-    fn screen_choices(&self) -> impl Iterator<Item = (&str, &str)> {
+    pub(super) fn screen_choices(&self) -> impl Iterator<Item = (&str, &str)> {
         self.project
             .manifest
             .as_ref()
@@ -72,58 +63,57 @@ impl ReviewWindow {
             )
     }
 
-    pub(super) fn screen_matches(&self, query: &str) -> bool {
-        self.screen_choices()
-            .any(|(_, title)| title.to_lowercase().contains(query))
-    }
-
-    pub(super) fn screen_navigation(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn screen_navigation(
+        &self,
+        max_height: gpui::Pixels,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let current = self
             .custom_screen()
             .map_or(PAUSE_MENU, |screen| screen.id.as_str());
         let active = self.menu_open;
+        let query = self.child_query(Tool::Ui);
         let list = div()
             .id("screen-list")
-            .max_h(px(120.))
+            .max_h(max_height)
             .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap_1()
-            .children(self.screen_choices().map(|(id, title)| {
-                let id = id.to_owned();
-                div().id(SharedString::from(format!("screen-{id}"))).child(
-                    action(
-                        "screen",
-                        title.to_owned(),
-                        self.tool == Some(Tool::Ui) && id == current,
-                    )
-                    .w_full()
-                    .justify_start()
-                    .overflow_hidden()
-                    .tab_stop(active)
-                    .on_click(cx.listener(move |view, _, _, cx| {
-                        view.select_screen(id.clone());
-                        cx.notify();
-                    })),
-                )
-            }));
+            .children(
+                self.screen_choices()
+                    .filter(|(id, title)| matches_entry(title, id, &query))
+                    .map(|(id, title)| {
+                        let id = id.to_owned();
+                        let selected = self.tool == Some(Tool::Ui) && id == current;
+                        div().id(SharedString::from(format!("screen-{id}"))).child(
+                            sidebar_action("screen", title.to_owned(), selected)
+                                .w_full()
+                                .overflow_hidden()
+                                .tab_stop(active)
+                                .on_click(cx.listener(move |view, _, _, cx| {
+                                    view.select_screen(id.clone());
+                                    cx.notify();
+                                })),
+                        )
+                    }),
+            );
         div()
             .ml_3()
             .flex()
             .flex_col()
             .gap_1()
-            .child(list)
             .when(
                 self.project.source.is_some() && self.project.manifest.is_some(),
                 |nav| {
                     nav.child(
-                        action("new-screen", "+ New Screen", false)
-                            .justify_start()
+                        create_action("new-screen", "+ New Screen")
                             .tab_stop(active)
                             .on_click(cx.listener(|view, _, _, cx| view.new_screen(cx))),
                     )
                 },
             )
+            .child(list)
             .when(self.project.manifest.is_none(), |nav| {
                 nav.child(note("No project manifest"))
             })
@@ -231,28 +221,23 @@ impl ReviewWindow {
         .detach();
     }
 
-    pub(super) fn object_definition_tools(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .gap_1()
-            .flex_wrap()
-            .px_3()
-            .pt_2()
-            .when(self.project.source.is_some(), |row| {
-                row.when(!self.before, |row| {
-                    row.child(
-                        action("add-box", "Add Box", false)
-                            .tab_stop(self.tool == Some(Tool::Objects))
-                            .on_click(cx.listener(|view, _, _, cx| view.add_scene_box(cx))),
-                    )
-                })
-                .child(
-                    action("open-scene-definition", "Open Definition", false)
-                        .tab_stop(self.tool == Some(Tool::Objects))
-                        .on_click(cx.listener(|view, _, _, cx| view.open_definition(false, cx))),
-                )
-            })
-            .into_any_element()
+    pub(super) fn add_box_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        (self.project.source.is_some() && !self.before).then(|| {
+            create_action("add-box", "+ Add Box")
+                .tab_stop(self.menu_open)
+                .on_click(cx.listener(|view, _, _, cx| view.add_scene_box(cx)))
+                .into_any_element()
+        })
+    }
+
+    pub(super) fn open_scene_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.project.source.as_ref()?;
+        Some(
+            action("open-scene-definition", "Open Definition", false)
+                .tab_stop(self.tool == Some(Tool::Objects))
+                .on_click(cx.listener(|view, _, _, cx| view.open_definition(false, cx)))
+                .into_any_element(),
+        )
     }
 
     fn add_scene_box(&mut self, cx: &mut Context<Self>) {
@@ -298,9 +283,10 @@ impl ReviewWindow {
             .as_deref()
             .is_some_and(|id| self.project.review.after().object(id).is_some())
             && let Some(id) = self.definitions.created_object.take()
-            && self.tool == Some(Tool::Objects)
+            && self.expanded_tool == Some(Tool::Objects)
         {
             self.before = false;
+            self.show_tool(Tool::Objects);
             self.select_object(id, cx);
         }
     }

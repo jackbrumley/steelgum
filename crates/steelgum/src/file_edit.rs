@@ -4,6 +4,21 @@ use std::path::Path;
 
 use tempfile::NamedTempFile;
 
+pub(crate) fn remove_json(source: &str, start: usize, end: usize) -> String {
+    let following = source[end..].trim_start();
+    let preceding = source[..start].trim_end();
+    let mut changed = source.to_owned();
+    let range = if following.starts_with(',') {
+        start..source.len() - following.len() + 1
+    } else if preceding.ends_with(',') {
+        preceding.len() - 1..end
+    } else {
+        start..end
+    };
+    changed.replace_range(range, "");
+    changed
+}
+
 /// Insert a JSON entry before a collection's closing delimiter.
 pub(crate) fn append_json(
     source: &mut String,

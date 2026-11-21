@@ -470,8 +470,8 @@ mod tests {
         let window = app.open_window(size(px(1024.), px(700.)), |window, cx| {
             cx.new(|cx| {
                 let mut view = ReviewWindow::new(project, cx);
-                view.toggle_ui_section();
-                assert!(view.definitions.ui_expanded && view.tool.is_none());
+                view.expand_tool(Some(Tool::Ui));
+                assert!(view.expanded_tool == Some(Tool::Ui) && view.tool.is_none());
                 assert!(view.screen_preview().is_none());
                 view.select_screen("pause-menu".into());
                 view.begin_menu_edit(window, cx);
@@ -549,7 +549,9 @@ mod tests {
         app.update(|cx| {
             window.update(cx, |view, _, _| {
                 view.show_tool(Tool::Objects);
-                assert!(!view.definitions.ui_expanded && view.screen_preview().is_none());
+                assert!(
+                    view.expanded_tool == Some(Tool::Objects) && view.screen_preview().is_none()
+                );
             })
         })?;
         Ok(())

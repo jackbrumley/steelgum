@@ -33,6 +33,12 @@ pub struct ScreenDefinition {
     pub button_label: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub enum AuthoredScreen {
+    Pause(PauseMenuConfig),
+    Custom(ScreenDefinition),
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CargoRunner {
@@ -183,6 +189,53 @@ pub fn create_screen(root: &Path) -> Result<ScreenDefinition, ProjectError> {
     })
 }
 
+/// Remove the reviewed screen while preserving unrelated manifest text.
+pub fn delete_screen(root: &Path, expected: &AuthoredScreen) -> Result<(), ProjectError> {
+    edit_manifest(root, |path, original, manifest| {
+        #[derive(Deserialize)]
+        struct Layout<'a> {
+            #[serde(borrow)]
+            pause_menu: Option<&'a RawValue>,
+            #[serde(default, borrow)]
+            screens: Vec<&'a RawValue>,
+        }
+        let layout: Layout<'_> =
+            serde_json::from_str(original).map_err(|source| ProjectError::Parse {
+                path: path.to_owned(),
+                source,
+            })?;
+        let (start, end) = match expected {
+            AuthoredScreen::Pause(menu) => {
+                if manifest.pause_menu.as_ref() != Some(menu) {
+                    return Err(ProjectError::Stale);
+                }
+                let raw = layout.pause_menu.ok_or(ProjectError::Stale)?.get();
+                let value = raw.as_ptr().addr() - original.as_ptr().addr();
+                let key = original[..value]
+                    .trim_end()
+                    .trim_end_matches(':')
+                    .trim_end();
+                let start = key
+                    .strip_suffix('"')
+                    .and_then(|key| key.rfind('"'))
+                    .ok_or(ProjectError::Stale)?;
+                (start, value + raw.len())
+            }
+            AuthoredScreen::Custom(screen) => {
+                let index = manifest
+                    .screens
+                    .iter()
+                    .position(|item| item == screen)
+                    .ok_or(ProjectError::Stale)?;
+                let raw = layout.screens[index].get();
+                let start = raw.as_ptr().addr() - original.as_ptr().addr();
+                (start, start + raw.len())
+            }
+        };
+        Ok((crate::file_edit::remove_json(original, start, end), ()))
+    })
+}
+
 /// Update the declared pause menu while preserving the rest of the manifest text.
 pub fn save_pause_menu(
     root: &Path,
@@ -306,7 +359,12 @@ mod tests {
         assert!(std::fs::read_to_string(path).unwrap().starts_with(original));
         assert_eq!(
             ProjectManifest::discover(root).unwrap().unwrap().screens,
-            [main, other]
+            [main.clone(), other.clone()]
+        );
+        delete_screen(root, &AuthoredScreen::Custom(main)).unwrap();
+        assert_eq!(
+            ProjectManifest::discover(root).unwrap().unwrap().screens,
+            [other]
         );
     }
 
@@ -343,6 +401,18 @@ mod tests {
             save_pause_menu(root, &existing, &existing),
             Err(ProjectError::Stale)
         ));
+        assert!(matches!(
+            delete_screen(root, &AuthoredScreen::Pause(existing)),
+            Err(ProjectError::Stale)
+        ));
+        delete_screen(root, &AuthoredScreen::Pause(edited)).unwrap();
+        assert!(
+            ProjectManifest::discover(root)
+                .unwrap()
+                .unwrap()
+                .pause_menu
+                .is_none()
+        );
     }
 
     #[test]

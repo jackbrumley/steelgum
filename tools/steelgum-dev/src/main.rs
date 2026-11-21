@@ -11,6 +11,8 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+mod cpu;
+
 const APP_NAME: &str = "steelgum-gpui";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
 const USAGE: &str = "Usage: cargo dev [--build-only | WORKTREE SCENE_PATH_RELATIVE_TO_WORKTREE]";
@@ -134,17 +136,11 @@ fn collect_files(path: PathBuf, files: &mut Snapshot) -> io::Result<()> {
 }
 
 fn build(app: &Path) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
-    let output = Command::new("cargo")
+    let output = cpu::build_command()?
         .current_dir(app)
         // Let the app's rust-toolchain.toml select its own toolchain.
         .env_remove("RUSTUP_TOOLCHAIN")
-        .args([
-            "build",
-            "--locked",
-            "--bin",
-            APP_NAME,
-            "--message-format=json",
-        ])
+        .args(["--locked", "--bin", APP_NAME, "--message-format=json"])
         .stderr(Stdio::inherit())
         .output()?;
     let mut executable = None;

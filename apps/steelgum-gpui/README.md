@@ -19,6 +19,13 @@ cargo dev
 It watches the desktop source, Steelgum core, and bundled demo scene. A
 successful build restarts the window. A compile error leaves the previous
 window open, with diagnostics in the terminal. Press **Ctrl+C** to stop.
+
+On Linux, the watcher uses `taskset` and `nice` to build at lower priority
+on at most half the available logical CPUs. On a single-CPU system it uses
+one lower-priority job. The desktop window itself uses the normal CPU
+settings. To leave more room for other apps, run `STEELGUM_BUILD_CPUS=2
+cargo dev`. On Windows the watcher limits Cargo jobs to half the available
+logical CPUs.
 To reopen the same project after each restart, pass the worktree and scene
 path to the watcher:
 

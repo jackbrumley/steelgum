@@ -1,2 +1,2 @@
 [alias]
-dev = ["run", "--locked", "-p", "steelgum-dev", "--"]
+dev = ["run", "--locked", "--jobs", "1", "-p", "steelgum-dev", "--"]

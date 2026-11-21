@@ -182,7 +182,18 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
     engine.from_object(singleton);
     Value tree;
     engine.call("get_main_loop", tree);
+    auto iterate = [&host]() {
+        Value quit;
+        host.call("iteration", quit);
+        if (quit.scalar<GDExtensionBool>(GDEXTENSION_VARIANT_TYPE_BOOL)) {
+            throw std::runtime_error("LibGodot exited before publishing a frame");
+        }
+    };
+
     if (abi_only) {
+        Value request;
+        tree.call("request_frame", request);
+        iterate();
         Value ready;
         tree.call("fixture_ready", ready);
         if (!ready.scalar<GDExtensionBool>(GDEXTENSION_VARIANT_TYPE_BOOL)) {
@@ -196,13 +207,13 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
     for (uint32_t index = 0; index < 2; ++index) {
         Value request;
         tree.call("request_frame", request);
+        // SceneTree flushes queued transforms and updates worlds during
+        // iteration. Drawing before that can read back the previous camera.
+        iterate();
+        Value draw;
+        tree.call("draw_requested_frame", draw);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
         for (;;) {
-            Value quit;
-            host.call("iteration", quit);
-            if (quit.scalar<GDExtensionBool>(GDEXTENSION_VARIANT_TYPE_BOOL)) {
-                throw std::runtime_error("LibGodot exited before publishing a frame");
-            }
             Value frame;
             tree.call("take_frame", frame);
             if (frame.type() != GDEXTENSION_VARIANT_TYPE_NIL) {
@@ -220,6 +231,7 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
                 throw std::runtime_error("Timed out waiting for the Godot SubViewport");
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
+            iterate();
         }
     }
 }

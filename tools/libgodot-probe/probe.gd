@@ -40,6 +40,8 @@ func request_frame() -> void:
 	camera.position = Vector3(2.5, 1.8, 3.6) if sequence == 0 else Vector3(-3.1, 1.0, 2.4)
 	camera.look_at(Vector3.ZERO)
 	sequence += 1
+
+func draw_requested_frame() -> void:
 	surface.render_target_update_mode = SubViewport.UPDATE_ONCE
 	RenderingServer.frame_post_draw.connect(_read_frame, CONNECT_ONE_SHOT)
 	RenderingServer.force_draw(false)

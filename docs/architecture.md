@@ -78,3 +78,10 @@ This is a direction for later authoring work. The first milestone focuses on
 one game, one backend, and the ability to check the same logic with and without
 a window. [Release and updates](release.md) records the desktop distribution
 plan.
+
+The GPUI workspace compares authored scene revisions using stable object IDs.
+Viewport clicks resolve to authored objects through the renderer adapter.
+The review request copies an optional user note, scene path, selected ID,
+resolved Git base commit, and per-object property changes to the clipboard.
+The comparison covers the scene loaded by the workspace. Refresh the project
+to include newer worktree changes.

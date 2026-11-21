@@ -47,6 +47,9 @@ impl ReviewWindow {
                         }),
                     )),
             )
+            .when(self.selected.is_some(), |panel| {
+                panel.child(self.review_request_control(cx))
+            })
             .into_any_element()
     }
 
@@ -92,18 +95,18 @@ impl ReviewWindow {
         note(label(id)).into_any_element()
     }
 
-    pub(super) fn scene_objects(&self, tool: Tool, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn scene_objects(&self, cx: &mut Context<Self>) -> AnyElement {
         let scene = self.scene_revision();
-        let title = if tool == Tool::Scene {
-            "Scene objects"
-        } else {
-            "Scene geometry"
-        };
         div()
+            .id("objects-list")
+            .track_scroll(&self.objects_scroll)
+            .min_h_0()
+            .flex_1()
+            .overflow_y_scroll()
+            .p_3()
             .flex()
             .flex_col()
             .gap_1()
-            .child(div().px_2().pb_1().child(note(title)))
             .when(scene.objects().is_empty(), |pane| {
                 pane.child(div().px_2().child(note("No objects in this revision.")))
             })
@@ -116,7 +119,7 @@ impl ReviewWindow {
             .into_any_element()
     }
 
-    pub(super) fn asset_details(&self) -> AnyElement {
+    pub(super) fn object_details(&self, cx: &mut Context<Self>) -> AnyElement {
         let selection = self
             .selected
             .as_deref()
@@ -131,6 +134,24 @@ impl ReviewWindow {
                 let [x, y, z] = object.size;
                 pane.child(div().truncate().text_sm().child(label(&object.id)))
                     .child(note(format!("{x} × {y} × {z}")))
+                    .when(
+                        self.project
+                            .review
+                            .changes()
+                            .iter()
+                            .any(|change| change.id == object.id),
+                        |pane| {
+                            pane.child(
+                                action("compare-selection", "Compare Changes", false)
+                                    .mt_2()
+                                    .on_click(cx.listener(|view, _, _, cx| {
+                                        view.show_tool(Tool::Changes);
+                                        cx.notify();
+                                    })),
+                            )
+                        },
+                    )
+                    .child(self.review_request_control(cx))
             })
             .when(selection.is_none(), |pane| {
                 pane.child(note("Select an object to see its dimensions."))
@@ -138,7 +159,7 @@ impl ReviewWindow {
             .into_any_element()
     }
 
-    fn scene_revision(&self) -> &steelgum::Scene {
+    pub(super) fn scene_revision(&self) -> &steelgum::Scene {
         if self.before {
             self.project.review.before()
         } else {
@@ -181,11 +202,7 @@ impl ReviewWindow {
             )
             .when_some(detail, |row, detail| row.child(note(detail)))
             .on_click(cx.listener(move |view, _: &ClickEvent, _, cx| {
-                if view.focus && view.selected.as_ref() != Some(&id) {
-                    view.viewport.reset_pan();
-                }
-                view.selected = Some(id.clone());
-                cx.notify();
+                view.select_object(id.clone(), cx);
             }))
             .into_any_element()
     }

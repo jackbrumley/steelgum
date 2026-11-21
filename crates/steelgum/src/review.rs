@@ -30,6 +30,7 @@ pub enum ObjectChanges {
 
 #[derive(Debug)]
 pub struct SceneReview {
+    base_revision: Option<String>,
     before: Scene,
     after: Scene,
     changes: Vec<ObjectChange>,
@@ -91,6 +92,7 @@ impl SceneReview {
         }));
         changes.sort_unstable_by(|left, right| left.id.cmp(&right.id));
         Self {
+            base_revision: None,
             before,
             after,
             changes,
@@ -122,14 +124,24 @@ impl SceneReview {
                 source,
             })?;
 
-        let revision = format!("HEAD:{git_path}");
+        let head = git_output(repo, "HEAD", &["rev-parse", "--verify", "HEAD"])?;
+        let head = std::str::from_utf8(head.trim_ascii())
+            .map_err(|_| ReviewError::InvalidGitText("HEAD".into()))?;
+        let revision = format!("{head}:{git_path}");
         let before = git_output(repo, &revision, &["cat-file", "blob", &revision])?;
         let before =
             std::str::from_utf8(&before).map_err(|_| ReviewError::InvalidGitText(revision))?;
-        Ok(Self::new(
+        let mut review = Self::new(
             parse_scene(before, "HEAD", scene_path)?,
             parse_scene(&working_text, "working tree", scene_path)?,
-        ))
+        );
+        review.base_revision = Some(head.to_owned());
+        Ok(review)
+    }
+
+    /// The exact Git commit used as the comparison base, when loaded from a worktree.
+    pub fn base_revision(&self) -> Option<&str> {
+        self.base_revision.as_deref()
     }
 
     pub fn before(&self) -> &Scene {
@@ -323,6 +335,11 @@ mod tests {
         std::fs::write(&room, scene(&[RED_PLATE]).to_json().unwrap()).unwrap();
 
         let result = SceneReview::from_git(&repo.0, relative).unwrap();
+        let head = git_output(&repo.0, "HEAD", &["rev-parse", "HEAD"]).unwrap();
+        assert_eq!(
+            result.base_revision().map(str::as_bytes),
+            Some(head.trim_ascii())
+        );
         assert_eq!(
             result.before().object("plate").unwrap().color,
             [45, 149, 236]

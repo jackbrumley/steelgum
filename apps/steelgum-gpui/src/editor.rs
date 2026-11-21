@@ -3,13 +3,16 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Result, anyhow, bail};
-use gpui::{App, Context, FocusHandle, PathPromptOptions, Window};
+use gpui::{App, Context, FocusHandle, PathPromptOptions, ScrollHandle, Window};
 use steelgum::review::SceneReview;
 
 use crate::viewport::Viewport;
 
+mod review_request;
 mod runner;
 mod workspace;
+
+use review_request::ReviewDraft;
 
 use runner::{Job, RunState};
 use workspace::Tool;
@@ -49,6 +52,9 @@ pub(crate) struct ReviewWindow {
     project: Project,
     before: bool,
     selected: Option<String>,
+    review_draft: ReviewDraft,
+    review_focus: FocusHandle,
+    objects_scroll: ScrollHandle,
     focus: bool,
     status: Option<String>,
     loading: bool,
@@ -73,6 +79,9 @@ impl ReviewWindow {
             project,
             before: false,
             selected,
+            review_draft: ReviewDraft::default(),
+            review_focus: cx.focus_handle().tab_stop(true),
+            objects_scroll: ScrollHandle::new(),
             focus: false,
             status: None,
             loading: false,
@@ -102,7 +111,7 @@ impl ReviewWindow {
                     .update(cx, |view, cx| {
                         let now = Instant::now();
                         let frames = view.viewport.rendered_frames();
-                        let fps = ((frames - previous_frames) as f64
+                        let fps = (frames.saturating_sub(previous_frames) as f64
                             / now.duration_since(sampled_at).as_secs_f64())
                         .round() as u32;
                         previous_frames = frames;
@@ -159,6 +168,7 @@ impl ReviewWindow {
                     Ok(Some((repo, path, review))) => {
                         window.apply_loaded(repo, path, review);
                         window.before = false;
+                        window.review_draft = ReviewDraft::default();
                         window.focus = false;
                         window.viewport.reset_pan();
                         window.run_state = RunState::Idle;
@@ -283,38 +293,13 @@ mod tests {
         let after = app.capture_screenshot(window.into())?;
         app.update(|cx| {
             window.update(cx, |view, _, cx| {
-                view.show_tool(Tool::Assets);
+                view.show_tool(Tool::Objects);
                 cx.notify();
             })
         })?;
         let assets = app.capture_screenshot(window.into())?;
         app.update_window(window.into(), |_, window, cx| {
-            let position = point(px(815.), px(161.));
-            window.dispatch_event(
-                PlatformInput::MouseMove(MouseMoveEvent {
-                    position,
-                    ..Default::default()
-                }),
-                cx,
-            );
-            window.dispatch_event(
-                PlatformInput::MouseDown(MouseDownEvent {
-                    position,
-                    button: MouseButton::Left,
-                    click_count: 1,
-                    ..Default::default()
-                }),
-                cx,
-            );
-            window.dispatch_event(
-                PlatformInput::MouseUp(MouseUpEvent {
-                    position,
-                    button: MouseButton::Left,
-                    click_count: 1,
-                    ..Default::default()
-                }),
-                cx,
-            );
+            click(window, cx, point(px(815.), px(131.)));
         })?;
         let selected = app.capture_screenshot(window.into())?;
         app.update(|cx| {
@@ -333,6 +318,22 @@ mod tests {
         app.update_window(window.into(), |_, window, cx| middle_drag(window, cx))?;
         let panned_3d = app.capture_screenshot(window.into())?;
         assert_ne!(selected, panned_3d, "middle drag should pan the 3D view");
+        app.update(|cx| {
+            window.update(cx, |view, _, cx| {
+                view.viewport.reset_pan();
+                cx.notify();
+            })
+        })?;
+        let _ = app.capture_screenshot(window.into())?;
+        app.update_window(window.into(), |_, window, cx| {
+            click(window, cx, point(px(420.), px(385.)));
+        })?;
+        app.run_until_parked();
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                assert_eq!(view.selected.as_deref(), Some("plate"));
+            })
+        })?;
 
         app.update(|cx| {
             window.update(cx, |view, window, cx| {
@@ -345,6 +346,21 @@ mod tests {
             })
         })?;
         let before = app.capture_screenshot(window.into())?;
+        app.update_window(window.into(), |_, window, cx| {
+            drag(window, cx, MouseButton::Left);
+        })?;
+        app.run_until_parked();
+        app.update(|cx| {
+            window.update(cx, |view, _, _| {
+                assert_eq!(
+                    view.selected.as_deref(),
+                    Some("plate"),
+                    "orbit must not pick"
+                );
+            })
+        })?;
+        let orbited = app.capture_screenshot(window.into())?;
+        assert_ne!(before, orbited, "left drag should orbit the 3D view");
 
         app.update(|cx| {
             window.update(cx, |view, _, cx| {
@@ -383,7 +399,7 @@ mod tests {
             std::fs::create_dir_all(&directory)?;
             before.save(directory.join("steelgum-gpui-before.png"))?;
             after.save(directory.join("steelgum-gpui-after.png"))?;
-            assets.save(directory.join("steelgum-gpui-assets.png"))?;
+            assets.save(directory.join("steelgum-gpui-objects.png"))?;
             top_down.save(directory.join("steelgum-gpui-top-down.png"))?;
         }
         let (blue_before, red_before) = count_plate_pixels(&before);
@@ -399,10 +415,41 @@ mod tests {
         Ok(())
     }
 
+    fn click(window: &mut Window, cx: &mut App, position: gpui::Point<gpui::Pixels>) {
+        window.dispatch_event(
+            PlatformInput::MouseMove(MouseMoveEvent {
+                position,
+                ..Default::default()
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseDown(MouseDownEvent {
+                position,
+                button: MouseButton::Left,
+                click_count: 1,
+                ..Default::default()
+            }),
+            cx,
+        );
+        window.dispatch_event(
+            PlatformInput::MouseUp(MouseUpEvent {
+                position,
+                button: MouseButton::Left,
+                click_count: 1,
+                ..Default::default()
+            }),
+            cx,
+        );
+    }
+
     fn middle_drag(window: &mut Window, cx: &mut App) {
+        drag(window, cx, MouseButton::Middle);
+    }
+
+    fn drag(window: &mut Window, cx: &mut App, button: MouseButton) {
         let start = point(px(420.), px(320.));
         let end = point(px(480.), px(345.));
-        let button = MouseButton::Middle;
         window.dispatch_event(
             PlatformInput::MouseDown(MouseDownEvent {
                 position: start,

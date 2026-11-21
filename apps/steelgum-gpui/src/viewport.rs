@@ -52,13 +52,14 @@ impl Viewport {
         self.surface.reset_pan();
     }
 
-    pub fn element(&self, view: View) -> AnyElement {
+    pub fn element(&self, view: View, select: impl Fn(String) + 'static) -> AnyElement {
         #[cfg(any(target_os = "linux", windows))]
         {
-            self.surface.element(view)
+            self.surface.element(view, select)
         }
         #[cfg(not(any(target_os = "linux", windows)))]
         {
+            let _ = select;
             let object_count = view.scene().objects().len();
             let selection = view.selection.as_deref().unwrap_or("None");
             let projection = if view.top_down { "2D" } else { "3D" };

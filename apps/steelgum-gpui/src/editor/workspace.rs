@@ -7,13 +7,13 @@ use gpui::{
 mod panels;
 use crate::viewport::View;
 
-const SHELL: u32 = 0x15181f;
+pub(super) const SHELL: u32 = 0x15181f;
 const TOOLBAR: u32 = 0x20242e;
 const PANEL: u32 = 0x1b1f28;
-const BORDER: u32 = 0x343b4a;
-const TEXT: u32 = 0xeef1f7;
-const MUTED: u32 = 0xaab4c6;
-const ACCENT: u32 = 0xbab5ff;
+pub(super) const BORDER: u32 = 0x343b4a;
+pub(super) const TEXT: u32 = 0xeef1f7;
+pub(super) const MUTED: u32 = 0xaab4c6;
+pub(super) const ACCENT: u32 = 0xbab5ff;
 const SELECTED: u32 = 0x353451;
 const ERROR: u32 = 0xffb5b4;
 const MENU_WIDTH: f32 = 182.;
@@ -21,8 +21,7 @@ const PANE_WIDTH: f32 = 258.;
 
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum Tool {
-    Scene,
-    Assets,
+    Objects,
     Changes,
     Build,
 }
@@ -30,8 +29,7 @@ pub(super) enum Tool {
 impl Tool {
     fn label(self) -> &'static str {
         match self {
-            Self::Scene => "Scene",
-            Self::Assets => "Assets",
+            Self::Objects => "Objects",
             Self::Changes => "Changes",
             Self::Build => "Build Game",
         }
@@ -39,8 +37,7 @@ impl Tool {
 
     fn icon(self) -> &'static str {
         match self {
-            Self::Scene => "◇",
-            Self::Assets => "▦",
+            Self::Objects => "◇",
             Self::Changes => "⑂",
             Self::Build => "⚒",
         }
@@ -53,9 +50,42 @@ impl ReviewWindow {
         self.closing_pane = None;
     }
 
+    fn select_from_viewport(&mut self, id: String, cx: &mut Context<Self>) {
+        let changed = self
+            .project
+            .review
+            .changes()
+            .iter()
+            .any(|change| change.id == id);
+        if self.tool != Some(Tool::Changes) || !changed {
+            self.show_tool(Tool::Objects);
+        }
+        if self.tool == Some(Tool::Objects)
+            && let Some(index) = self
+                .scene_revision()
+                .objects()
+                .iter()
+                .position(|object| object.id == id)
+        {
+            self.objects_scroll.scroll_to_item(index);
+        }
+        self.select_object(id, cx);
+    }
+
+    fn select_object(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.selected.as_ref() != Some(&id) {
+            if self.focus {
+                self.viewport.reset_pan();
+            }
+            self.selected = Some(id);
+            self.review_draft = Default::default();
+        }
+        cx.notify();
+    }
+
     fn matching_tools(&self) -> impl Iterator<Item = Tool> + '_ {
         let query = self.search.trim().to_lowercase();
-        [Tool::Scene, Tool::Assets, Tool::Changes, Tool::Build]
+        [Tool::Objects, Tool::Changes, Tool::Build]
             .into_iter()
             .filter(move |tool| tool.label().to_lowercase().contains(&query))
     }
@@ -67,6 +97,10 @@ impl ReviewWindow {
     }
 
     fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.handle_review_key(event, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         let stroke = &event.keystroke;
         if (stroke.modifiers.control || stroke.modifiers.platform) && stroke.key == "k" {
             self.focus_search(window, cx);
@@ -266,6 +300,16 @@ impl ReviewWindow {
             .flex()
             .flex_col()
             .when_some(tool, |pane, tool| {
+                let scroll = |content: AnyElement| {
+                    div()
+                        .id(tool.label())
+                        .min_h_0()
+                        .flex_1()
+                        .overflow_y_scroll()
+                        .p_3()
+                        .child(content)
+                        .into_any_element()
+                };
                 pane.child(
                     bar()
                         .child(
@@ -285,21 +329,13 @@ impl ReviewWindow {
                                 })),
                         ),
                 )
-                .child(
-                    div()
-                        .id(tool.label())
-                        .min_h_0()
-                        .flex_1()
-                        .overflow_y_scroll()
-                        .p_3()
-                        .child(match tool {
-                            Tool::Changes => self.changes(cx),
-                            Tool::Scene | Tool::Assets => self.scene_objects(tool, cx),
-                            Tool::Build => self.build(cx),
-                        }),
-                )
-                .when(tool == Tool::Assets, |pane| {
-                    pane.child(self.asset_details())
+                .child(match tool {
+                    Tool::Objects => self.scene_objects(cx),
+                    Tool::Changes => scroll(self.changes(cx)),
+                    Tool::Build => scroll(self.build(cx)),
+                })
+                .when(tool == Tool::Objects, |pane| {
+                    pane.child(self.object_details(cx))
                 })
             });
         slide("tool-pane", PANE_WIDTH, self.tool.is_some(), content)
@@ -373,7 +409,16 @@ impl ReviewWindow {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .child(self.viewport.element(view))
+                    .child(self.viewport.element(view, {
+                        let entity = cx.weak_entity();
+                        let app = cx.to_async();
+                        move |id| {
+                            let entity = entity.clone();
+                            app.spawn(async move |cx| {
+                                let _ = entity.update(cx, |view, cx| view.select_from_viewport(id, cx));
+                            }).detach();
+                        }
+                    }))
                     .into_any_element()
             })
             .child(
@@ -388,9 +433,9 @@ impl ReviewWindow {
                             .text_sm()
                             .text_color(rgb(MUTED))
                             .child(if self.top_down {
-                                "Middle-drag to pan · Scroll to zoom"
+                                "Click to select · Middle-drag to pan · Scroll to zoom"
                             } else {
-                                "Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
+                                "Click to select · Left-drag to orbit · Middle-drag to pan · Scroll to zoom"
                             }),
                     )
                     .when(self.selected.is_some(), |bar| {
@@ -452,7 +497,7 @@ impl Render for ReviewWindow {
     }
 }
 
-fn note(text: impl Into<gpui::SharedString>) -> Div {
+pub(super) fn note(text: impl Into<gpui::SharedString>) -> Div {
     div().text_xs().text_color(rgb(MUTED)).child(text.into())
 }
 
@@ -479,7 +524,11 @@ fn bar() -> Div {
         .border_color(rgb(BORDER))
 }
 
-fn action(id: &'static str, text: impl Into<gpui::SharedString>, active: bool) -> Stateful<Div> {
+pub(super) fn action(
+    id: &'static str,
+    text: impl Into<gpui::SharedString>,
+    active: bool,
+) -> Stateful<Div> {
     control(id, text, active).hover(|style| style.bg(rgb(SELECTED)))
 }
 

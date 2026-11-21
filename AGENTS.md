@@ -68,6 +68,14 @@ installation share the same installers. See [Release and updates](docs/release.m
 
 ## Verification
 
+On the maintainer’s shared Linux desktop, run agent-started Cargo builds,
+Clippy checks, tests, and verification scripts at lower priority with
+`taskset` and `nice`. Limit the entire process tree to at most two of the
+CPUs allowed for the current process, including the linker and test binaries.
+Set `STEELGUM_BUILD_CPUS=2` for `cargo dev` as well. If the maintainer reports
+game or audio disruption, stop active build and test jobs and wait for their
+go-ahead before starting another one.
+
 Run `python3 scripts/verify.py` before submitting a change. It runs the hygiene,
 formatting, Clippy and test checks. CI checks Windows and Linux. Use
 `python3 scripts/hygiene.py` for the repository rules alone. `--headless-only`

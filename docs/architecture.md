@@ -104,3 +104,8 @@ under a separate project directory and are previewed by the workspace.
 The installed workspace launches a sibling player for its bundled example.
 Project builds use the shared Cargo CPU budget, and play sessions launch the
 built binary with the saved scene.
+
+The live agent interface queries the open workspace through a per-user local
+request directory. A stdio MCP adapter exposes the same status, object list,
+and capture commands as the live CLI. Object captures temporarily render a
+framed view, queue the PNG readback, and restore the current viewport.

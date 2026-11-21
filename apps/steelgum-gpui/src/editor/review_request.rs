@@ -10,7 +10,6 @@ use steelgum::SceneObject;
 use super::object_rename::object_label;
 use super::workspace::{ACCENT, BORDER, MUTED, SHELL, TEXT, action, note};
 use super::{Project, ReviewWindow, label};
-use crate::viewport::View;
 
 #[derive(Default)]
 pub(super) struct ReviewDraft {
@@ -181,13 +180,7 @@ impl ReviewWindow {
             return;
         }
 
-        let capture = self.viewport.capture(&View {
-            review: self.project.review.clone(),
-            before: self.before,
-            selection: self.selected.clone(),
-            focus: self.focus,
-            top_down: self.top_down,
-        });
+        let capture = self.viewport.capture(&self.viewport_view());
         let capture = match capture {
             Ok(capture) => capture,
             Err(error) => {

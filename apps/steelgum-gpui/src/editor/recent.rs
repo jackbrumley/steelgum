@@ -56,6 +56,10 @@ impl Project {
 }
 
 fn state_path() -> Option<PathBuf> {
+    state_directory().map(|directory| directory.join("last-project.json"))
+}
+
+pub(crate) fn state_directory() -> Option<PathBuf> {
     let override_directory = std::env::var_os("STEELGUM_STATE_DIR").map(PathBuf::from);
     #[cfg(windows)]
     let directory = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
@@ -63,7 +67,5 @@ fn state_path() -> Option<PathBuf> {
     let directory = std::env::var_os("XDG_STATE_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")));
-    override_directory
-        .or_else(|| directory.map(|directory| directory.join("steelgum")))
-        .map(|directory| directory.join("last-project.json"))
+    override_directory.or_else(|| directory.map(|directory| directory.join("steelgum")))
 }

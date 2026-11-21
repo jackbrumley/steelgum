@@ -137,6 +137,40 @@ worktree-relative scene. The response includes a protocol version, Git base,
 and selected scene. Agents can make changes in the worktree and see them
 appear live in the open workspace.
 
+## Live editor and MCP
+
+Keep a Steelgum window open and use the same workspace executable for the
+live tools:
+
+```sh
+steelgum --live status
+steelgum --live list-objects
+steelgum --live capture
+steelgum --live capture divider after
+```
+
+Add a local stdio MCP server in your coding agent with command
+`/full/path/to/steelgum` and arguments `["--mcp"]`. For a source build, use
+the full path to `apps/steelgum-gpui/target/debug/steelgum-gpui`. The server
+offers:
+
+- `steelgum_status` for the open project, loaded runner, selected object,
+  and current project, scene, and build status.
+- `steelgum_list_objects` for the displayed revision's objects and the
+  current per-object changes.
+- `steelgum_capture` for the current viewport. Pass an optional
+  `object_id` to frame that object, and `revision` to choose `before` or
+  `after` for the framed capture.
+
+Captures return a local PNG path, the scene revision, and a hash of the
+captured scene model. MCP responses also include an inline preview when the
+PNG is small enough. Framing a capture preserves the visible camera and
+selection. The stdio server finds the running workspace through the
+per-user state directory and exchanges messages in a private temporary
+directory. If you set `STEELGUM_STATE_DIR`, use the same value for both
+processes. The newest Steelgum window receives
+new live requests.
+
 Steelgum owns the comparison and stable authored IDs. GPUI controls the
 window and passes camera input to the viewport. Bevy draws offscreen on
 GPUI's wgpu device, and GPUI samples the resulting GPU texture. Linux uses

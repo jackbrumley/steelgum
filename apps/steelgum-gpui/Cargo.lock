@@ -7359,6 +7359,7 @@ name = "steelgum-gpui"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bevy",
  "bite-gp-wgpu",
  "bite-gpui",
@@ -7368,6 +7369,7 @@ dependencies = [
  "raw-window-handle",
  "serde",
  "serde_json",
+ "sha2",
  "steelgum",
  "steelgum-update",
  "tempfile",

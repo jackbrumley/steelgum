@@ -50,6 +50,18 @@ impl Viewport {
         }
     }
 
+    pub fn capture_framed(&self, view: &View) -> anyhow::Result<PendingScreenshot> {
+        #[cfg(any(target_os = "linux", windows))]
+        {
+            self.surface.capture_framed(view)
+        }
+        #[cfg(not(any(target_os = "linux", windows)))]
+        {
+            let _ = view;
+            anyhow::bail!("Viewport screenshots are available on Linux and Windows.")
+        }
+    }
+
     pub fn rendered_frames(&self) -> u64 {
         #[cfg(any(target_os = "linux", windows))]
         {

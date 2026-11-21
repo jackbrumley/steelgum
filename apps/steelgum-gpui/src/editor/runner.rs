@@ -64,7 +64,7 @@ impl JobControl {
         }
     }
 
-    fn output(&self) -> String {
+    pub(super) fn output(&self) -> String {
         self.0
             .output
             .lock()

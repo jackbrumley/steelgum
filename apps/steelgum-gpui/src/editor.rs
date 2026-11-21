@@ -6,10 +6,11 @@ use anyhow::{Result, anyhow};
 use gpui::{App, Context, FocusHandle, PathPromptOptions, ScrollHandle, Task, Window};
 use steelgum::{project::ProjectManifest, review::SceneReview};
 
-use crate::viewport::Viewport;
+use crate::viewport::{View, Viewport};
 
 pub(crate) mod agent;
 mod assets;
+mod bridge;
 mod live_refresh;
 mod object_rename;
 mod recent;
@@ -18,6 +19,7 @@ mod runner;
 mod workspace;
 
 use live_refresh::SourceStamp;
+pub(crate) use recent::state_directory;
 use review_request::ReviewDraft;
 
 use runner::{Job, JobControl, RunState};
@@ -126,6 +128,7 @@ pub(crate) struct ReviewWindow {
     status: Option<String>,
     loading: bool,
     live_refresh: Option<Task<()>>,
+    agent_bridge: Option<crate::live_bridge::Bridge>,
     refresh_requested: bool,
     live_issue: Option<String>,
     viewport: Viewport,
@@ -162,6 +165,7 @@ impl ReviewWindow {
             status: None,
             loading: false,
             live_refresh: None,
+            agent_bridge: None,
             refresh_requested: false,
             live_issue: None,
             viewport: Viewport::default(),
@@ -180,6 +184,16 @@ impl ReviewWindow {
         };
         window.watch_project(cx);
         window
+    }
+
+    fn viewport_view(&self) -> View {
+        View {
+            review: self.project.review.clone(),
+            before: self.before,
+            selection: self.selected.clone(),
+            focus: self.focus && self.selected.is_some(),
+            top_down: self.top_down,
+        }
     }
 
     pub(crate) fn set_startup_notice(&mut self, notice: Option<String>) {
@@ -329,20 +343,28 @@ mod tests {
             })
         })?;
         let after = app.capture_screenshot(window.into())?;
-        let capture = app.update(|cx| {
-            window.update(cx, |view, _, _| {
-                view.viewport.capture(&crate::viewport::View {
-                    review: view.project.review.clone(),
-                    before: view.before,
-                    selection: view.selected.clone(),
-                    focus: view.focus,
-                    top_down: view.top_down,
-                })
+        let (capture, framed, restored) = app.update(|cx| {
+            window.update(cx, |review, _, _| -> Result<_> {
+                let view = review.viewport_view();
+                let capture = review.viewport.capture(&view)?;
+                let framed = review.viewport.capture_framed(&View {
+                    selection: Some("door".into()),
+                    focus: true,
+                    ..view.clone()
+                })?;
+                let restored = review.viewport.capture(&view)?;
+                Ok((capture, framed, restored))
             })
         })??;
-        let image = image::load_from_memory(&capture()?)?;
+        let pixels = capture()?;
+        let image = image::load_from_memory(&pixels)?;
         assert!(image.width() > 100 && image.height() > 100);
-
+        assert_ne!(pixels, framed()?, "the object should get its own framing");
+        assert_eq!(
+            pixels,
+            restored()?,
+            "capture must restore the visible frame"
+        );
         app.update(|cx| {
             window.update(cx, |view, _, cx| {
                 view.show_tool(Tool::Objects);

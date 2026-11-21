@@ -1,4 +1,5 @@
 mod editor;
+mod live_bridge;
 mod updates;
 mod viewport;
 #[cfg(windows)]
@@ -25,13 +26,24 @@ fn main() -> Result<()> {
     {
         return editor::agent::run(&arguments[1..]);
     }
+    if let [argument] = arguments.as_slice()
+        && argument == "--mcp"
+    {
+        return live_bridge::run_mcp();
+    }
+    if arguments
+        .first()
+        .is_some_and(|argument| argument == "--live")
+    {
+        return live_bridge::run_cli(&arguments[1..]);
+    }
     if updates::handle_cli(&arguments)? {
         return Ok(());
     }
     match arguments.first().and_then(|argument| argument.to_str()) {
         Some("--help" | "-h") => {
             println!("Usage: steelgum [WORKTREE [SCENE_PATH_RELATIVE_TO_ROOT]]");
-            println!("       steelgum --agent --help");
+            println!("       steelgum --agent --help | --live --help | --mcp");
             println!("       steelgum --version | --check-updates | --update");
             println!("       steelgum [--scene PATH] [--capture PATH]");
             return Ok(());
@@ -71,6 +83,7 @@ fn main() -> Result<()> {
             cx.new(|cx| {
                 let mut workspace = editor::ReviewWindow::new(project, cx);
                 workspace.set_startup_notice(notice);
+                workspace.start_agent_bridge(cx);
                 workspace.focus(window, cx);
                 workspace
             })

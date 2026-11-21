@@ -182,6 +182,20 @@ impl Renderer {
         size: [u32; 2],
         orbit: Orbit,
     ) -> Result<()> {
+        self.render_frame(view, size, orbit)?;
+        let frame = self
+            .frame
+            .0
+            .lock()
+            .map_err(|_| anyhow!("Bevy's render texture lock was poisoned"))?
+            .clone();
+        if let Some(frame) = frame {
+            gpu.paint_texture(frame.to_imported_handle()?, Corners::default(), 1.0, false);
+        }
+        Ok(())
+    }
+
+    fn render_frame(&mut self, view: &View, size: [u32; 2], orbit: Orbit) -> Result<()> {
         let first_frame = self.displayed.is_none();
         let scene_changed = self.displayed.as_ref().is_none_or(|old| {
             !Rc::ptr_eq(&view.review, &old.review)
@@ -232,16 +246,21 @@ impl Renderer {
             self.frames += 1;
         }
 
+        Ok(())
+    }
+
+    fn readback(&self) -> Result<PendingScreenshot> {
         let frame = self
             .frame
             .0
             .lock()
-            .map_err(|_| anyhow!("Bevy's render texture lock was poisoned"))?
-            .clone();
-        if let Some(frame) = frame {
-            gpu.paint_texture(frame.to_imported_handle()?, Corners::default(), 1.0, false);
-        }
-        Ok(())
+            .map_err(|_| anyhow!("Could not read the rendered viewport."))?;
+        let texture = frame
+            .as_ref()
+            .ok_or_else(|| anyhow!("No scene image is ready yet."))?
+            .texture();
+        let capture = screenshot::Readback::start(&self.device, &self.queue, texture)?;
+        Ok(Box::new(move || capture.png()))
     }
 }
 
@@ -389,17 +408,27 @@ impl Surface {
                 && displayed.top_down == expected.top_down,
             "The viewport is changing. Try copying after the scene appears."
         );
-        let view = renderer
-            .frame
-            .0
-            .lock()
-            .map_err(|_| anyhow!("Could not read the rendered viewport."))?;
-        let texture = view
-            .as_ref()
-            .ok_or_else(|| anyhow!("No scene image is ready yet."))?
-            .texture();
-        let capture = screenshot::Readback::start(&renderer.device, &renderer.queue, texture)?;
-        Ok(Box::new(move || capture.png()))
+        renderer.readback()
+    }
+
+    pub fn capture_framed(&self, view: &View) -> Result<PendingScreenshot> {
+        let mut renderer = self.renderer.borrow_mut();
+        let renderer = renderer
+            .as_mut()
+            .ok_or_else(|| anyhow!("The viewport has not rendered yet."))?;
+        let previous = renderer
+            .displayed
+            .clone()
+            .ok_or_else(|| anyhow!("No scene has been drawn yet."))?;
+        let size = renderer.size;
+        let orbit = renderer.orbit;
+        // The copy is submitted before restoring the scene on the same GPU
+        // queue. GPUI paints only after the original framing is back.
+        let capture = renderer
+            .render_frame(view, size, Orbit::default())
+            .and_then(|()| renderer.readback());
+        renderer.render_frame(&previous, size, orbit)?;
+        capture
     }
 
     pub fn rendered_frames(&self) -> u64 {

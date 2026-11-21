@@ -13,6 +13,8 @@ unsafe_code = "deny"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
+sha2 = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 gpui = { package = "bite-gpui", version = "=1.25.203", default-features = false, features = ["platform"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

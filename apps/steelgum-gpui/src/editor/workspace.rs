@@ -7,7 +7,6 @@ use gpui::{
 mod panels;
 mod tool;
 
-use crate::viewport::View;
 pub(super) use tool::Tool;
 
 pub(super) const SHELL: u32 = 0x15181f;
@@ -334,13 +333,7 @@ impl ReviewWindow {
     }
 
     fn scene(&self, cx: &mut Context<Self>) -> Div {
-        let view = View {
-            review: self.project.review.clone(),
-            before: self.before,
-            selection: self.selected.clone(),
-            focus: self.focus && self.selected.is_some(),
-            top_down: self.top_down,
-        };
+        let view = self.viewport_view();
         let source = self.project.source.as_ref();
         let title = source.and_then(|(_, path)| path.file_stem()).map_or_else(
             || "Door Room".into(),

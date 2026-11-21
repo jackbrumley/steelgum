@@ -4,25 +4,58 @@ use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
 use gpui::Context;
+use steelgum::project::{MANIFEST_FILE, ProjectManifest};
 use steelgum::review::SceneReview;
 
-use super::{ReviewDraft, ReviewWindow};
+use super::{Project, ReviewDraft, ReviewWindow, Tool};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(750);
 
+type FileStamp = Result<(SystemTime, u64), io::ErrorKind>;
+
 #[derive(PartialEq, Eq)]
 pub(super) struct SourceStamp {
-    scene: Result<(SystemTime, u64), io::ErrorKind>,
+    scene: FileStamp,
+    manifest: FileStamp,
     head: Result<String, String>,
 }
 
 impl SourceStamp {
-    pub(super) fn read(repo: &Path, scene: &Path) -> Self {
-        let scene = std::fs::metadata(repo.join(scene))
-            .and_then(|metadata| Ok((metadata.modified()?, metadata.len())))
-            .map_err(|error| error.kind());
+    fn read(repo: &Path, scene: &Path) -> Self {
+        Self::read_with_manifest(repo, scene, Self::read_manifest(repo))
+    }
+
+    pub(super) fn read_manifest(repo: &Path) -> FileStamp {
+        file_stamp(&repo.join(MANIFEST_FILE))
+    }
+
+    pub(super) fn read_with_manifest(repo: &Path, scene: &Path, manifest: FileStamp) -> Self {
+        let scene = file_stamp(&repo.join(scene));
         let head = SceneReview::worktree_head(repo).map_err(|error| error.to_string());
-        Self { scene, head }
+        Self {
+            scene,
+            manifest,
+            head,
+        }
+    }
+}
+
+fn file_stamp(path: &Path) -> FileStamp {
+    std::fs::metadata(path)
+        .and_then(|metadata| Ok((metadata.modified()?, metadata.len())))
+        .map_err(|error| error.kind())
+}
+
+struct ProjectRefresh {
+    manifest: Option<ProjectManifest>,
+    review: SceneReview,
+}
+
+impl ProjectRefresh {
+    fn read(repo: &Path, scene: &Path) -> Result<Self, String> {
+        let manifest = ProjectManifest::discover(repo).map_err(|error| error.to_string())?;
+        let review = SceneReview::from_git(repo, scene).map_err(|error| error.to_string())?;
+        Ok(Self { manifest, review })
     }
 }
 
@@ -96,9 +129,7 @@ impl ReviewWindow {
                     let repo = repo.clone();
                     let scene = scene.clone();
                     executor
-                        .spawn(async move {
-                            SceneReview::from_git(&repo, &scene).map_err(|error| error.to_string())
-                        })
+                        .spawn(async move { ProjectRefresh::read(&repo, &scene) })
                         .await
                 };
                 let Ok(applied) = this.update(cx, |window, cx| {
@@ -107,14 +138,14 @@ impl ReviewWindow {
                         // for another check if the current project stays open.
                         return false;
                     }
-                    window.apply_refresh(loaded);
+                    window.apply_refresh(loaded, cx);
                     cx.notify();
                     true
                 }) else {
                     break;
                 };
                 if applied {
-                    // Retry a failed parse only when the file or Git base
+                    // Retry a failed parse only when the project files or Git base
                     // changes again, or the user requests a manual refresh.
                     detector.handled = stamp;
                 }
@@ -130,9 +161,25 @@ impl ReviewWindow {
         }
     }
 
-    fn apply_refresh(&mut self, loaded: Result<SceneReview, String>) {
+    fn apply_refresh(&mut self, loaded: Result<ProjectRefresh, String>, cx: &mut Context<Self>) {
         match loaded {
-            Ok(review) => {
+            Ok(ProjectRefresh { manifest, review }) => {
+                let old_assets = self
+                    .project
+                    .manifest
+                    .as_ref()
+                    .and_then(|project| project.assets.as_ref());
+                let new_assets = manifest
+                    .as_ref()
+                    .and_then(|project| project.assets.as_ref());
+                let refresh_assets = self.tool == Some(Tool::Assets) && old_assets != new_assets;
+                if let Some((repo, _)) = &self.project.source {
+                    self.project.name = Project::name_for(repo, manifest.as_ref());
+                }
+                self.project.manifest = manifest;
+                if refresh_assets {
+                    self.refresh_assets(cx);
+                }
                 if self.selected.as_ref().is_some_and(|id| {
                     review.before().object(id).is_none() && review.after().object(id).is_none()
                 }) {
@@ -160,7 +207,6 @@ mod tests {
     use gpui_wgpu::CosmicTextSystem;
 
     use super::*;
-    use crate::editor::Project;
 
     #[test]
     fn live_refresh_preserves_the_scene_on_failure_and_recovers() -> Result<()> {
@@ -234,6 +280,39 @@ mod tests {
             assert_ne!(view.project.review.base_revision(), Some(old_head.as_str()));
             assert!(view.project.review.changes().is_empty());
             assert_eq!(view.selected.as_deref(), Some("plate"));
+            assert!(!view.project.can_run());
+        });
+
+        // The manifest can gain a runner without touching the open scene or Git HEAD.
+        std::fs::write(
+            repo.join(MANIFEST_FILE),
+            r#"{
+                "version": 1,
+                "name": "Live runner",
+                "scene": "room.json",
+                "runner": {"manifest": "Cargo.toml", "binary": "live-runner"}
+            }"#,
+        )?;
+        tick(&app);
+        tick(&app);
+        app.update(|cx| {
+            let view = view.read(cx);
+            assert!(view.project.can_run());
+            assert_eq!(view.project.name, "Live runner");
+            assert_eq!(view.selected.as_deref(), Some("plate"));
+        });
+
+        std::fs::write(repo.join(MANIFEST_FILE), "{")?;
+        tick(&app);
+        tick(&app);
+        app.update(|cx| {
+            let view = view.read(cx);
+            assert!(
+                view.live_issue
+                    .as_deref()
+                    .is_some_and(|issue| issue.contains(MANIFEST_FILE))
+            );
+            assert!(view.project.can_run(), "keep the last valid runner");
         });
         Ok(())
     }

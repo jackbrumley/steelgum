@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -50,6 +50,18 @@ impl Project {
     pub fn discover(repo: PathBuf) -> Result<Self> {
         Ok(LoadedProject::read(repo, None)?.into_project())
     }
+
+    fn name_for(repo: &Path, manifest: Option<&ProjectManifest>) -> String {
+        manifest.map_or_else(
+            || {
+                repo.file_name()
+                    .unwrap_or(repo.as_os_str())
+                    .to_string_lossy()
+                    .into_owned()
+            },
+            |manifest| manifest.name.clone(),
+        )
+    }
 }
 
 struct LoadedProject {
@@ -63,6 +75,7 @@ struct LoadedProject {
 impl LoadedProject {
     fn read(repo: PathBuf, path: Option<PathBuf>) -> Result<Self> {
         let repo = repo.canonicalize()?;
+        let manifest_stamp = SourceStamp::read_manifest(&repo);
         let manifest = ProjectManifest::discover(&repo)?;
         let path = path
             .or_else(|| manifest.as_ref().map(|manifest| manifest.scene.clone()))
@@ -75,7 +88,7 @@ impl LoadedProject {
             .ok_or_else(|| anyhow!("No steelgum.json or supported scene in {}", repo.display()))?;
         // Observe before reading so an edit during the read is still eligible
         // for the next live refresh.
-        let stamp = SourceStamp::read(&repo, &path);
+        let stamp = SourceStamp::read_with_manifest(&repo, &path, manifest_stamp);
         let review = SceneReview::from_git(&repo, &path)?;
         Ok(Self {
             manifest,
@@ -87,16 +100,7 @@ impl LoadedProject {
     }
 
     fn into_project(self) -> Project {
-        let name = self.manifest.as_ref().map_or_else(
-            || {
-                self.repo
-                    .file_name()
-                    .unwrap_or(self.repo.as_os_str())
-                    .to_string_lossy()
-                    .into_owned()
-            },
-            |manifest| manifest.name.clone(),
-        );
+        let name = Project::name_for(&self.repo, self.manifest.as_ref());
         Project {
             name,
             manifest: self.manifest,

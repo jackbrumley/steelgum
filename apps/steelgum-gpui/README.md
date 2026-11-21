@@ -92,10 +92,9 @@ be opened. You can pass a scene path relative to the worktree:
 cargo run --locked -- /path/to/worktree scenes/level.json
 ```
 
-An open worktree refreshes after the scene file or Git `HEAD` changes. The
+An open worktree refreshes after the scene, project manifest, or Git `HEAD` changes. The
 viewport keeps its camera and selected object while **Changes** updates.
-An invalid or temporarily missing scene leaves the last valid scene visible
-with an error. The next valid save clears the error. **Refresh** is also
+Invalid project data leaves the last valid project visible with an error. The next valid save clears the error. **Refresh** is also
 available to request a fresh read.
 
 ## Project manifest
@@ -117,8 +116,9 @@ baseline scene before opening it. The runner is optional for review-only
 projects. When present, Steelgum builds the selected Cargo binary and
 launches it from the worktree with `--scene` and the saved scene path.
 Build and Play run the project's code and require a compatible Rust
-toolchain. Use them with worktrees you trust. Reopen the folder after editing
-its manifest.
+toolchain. Use them with worktrees you trust. Manifest changes update the
+runner and assets in the open project. Reopen the folder to switch to a new
+starting scene declared in the manifest.
 
 ## Agent commands
 

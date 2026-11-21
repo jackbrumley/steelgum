@@ -428,7 +428,7 @@ impl ReviewWindow {
                                 .p_2()
                                 .text_sm()
                                 .text_color(rgb(ERROR))
-                                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Showing the last valid scene"))
+                                .child(div().font_weight(gpui::FontWeight::SEMIBOLD).child("Showing the last valid project"))
                                 .child(issue.to_owned()),
                         )
                     }),

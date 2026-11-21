@@ -35,6 +35,15 @@ The directory pins Rust 1.99.1. On Debian-based Linux systems, the build uses
 window you need a graphical session and a supported GPU adapter. Use the MSVC
 Rust target and Windows build tools for the Windows experiment.
 
+Run `cargo dev --build-only` from the repository root to build and link the
+same binary the watcher starts, without opening a window. The full repository
+verification runs this command. If the linker reports `-lxkbcommon-x11`
+missing on Linux Mint, Ubuntu, or Debian, install the development package:
+
+```sh
+sudo apt install libxkbcommon-x11-dev
+```
+
 - Use the top-left menu button to collapse the tools. **Ctrl+K** opens and
   focuses **Find a tool**. Type part of a tool name and press **Enter** to
   open the first match.

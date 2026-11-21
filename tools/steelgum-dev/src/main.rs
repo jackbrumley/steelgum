@@ -13,24 +13,36 @@ use std::time::{Duration, SystemTime};
 
 const APP_NAME: &str = "steelgum-gpui";
 const POLL_INTERVAL: Duration = Duration::from_millis(250);
+const USAGE: &str = "Usage: cargo dev [--build-only | WORKTREE SCENE_PATH_RELATIVE_TO_WORKTREE]";
 
 type Snapshot = BTreeMap<PathBuf, (SystemTime, u64)>;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
-    match arguments.as_mut_slice() {
-        [] => {}
+    let build_only = match arguments.as_mut_slice() {
+        [] => false,
+        [flag] if flag == "--build-only" => true,
         [flag] if flag == "--help" || flag == "-h" => {
-            println!("Usage: cargo dev [WORKTREE SCENE_PATH_RELATIVE_TO_WORKTREE]");
+            println!("{USAGE}");
             return Ok(());
         }
-        [worktree, _] => *worktree = std::path::absolute(Path::new(worktree))?.into_os_string(),
-        _ => return Err("Usage: cargo dev [WORKTREE SCENE_PATH_RELATIVE_TO_WORKTREE]".into()),
-    }
+        [worktree, _] => {
+            *worktree = std::path::absolute(Path::new(worktree))?.into_os_string();
+            false
+        }
+        _ => return Err(USAGE.into()),
+    };
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()?;
     let app = root.join("apps").join(APP_NAME);
+    if build_only {
+        if build(&app)?.is_none() {
+            return Err("Steelgum desktop build failed".into());
+        }
+        println!("Steelgum desktop binary built and linked.");
+        return Ok(());
+    }
     let stopping = Arc::new(AtomicBool::new(false));
     ctrlc::set_handler({
         let stopping = stopping.clone();
@@ -131,13 +143,11 @@ fn build(app: &Path) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
             "--locked",
             "--bin",
             APP_NAME,
-            "--message-format=json-render-diagnostics",
+            "--message-format=json",
         ])
         .stderr(Stdio::inherit())
         .output()?;
-    if !output.status.success() {
-        return Ok(None);
-    }
+    let mut executable = None;
     for line in output.stdout.lines() {
         let line = line?;
         if !line.starts_with('{') {
@@ -145,14 +155,38 @@ fn build(app: &Path) -> Result<Option<PathBuf>, Box<dyn std::error::Error>> {
             continue;
         }
         let message: serde_json::Value = serde_json::from_str(&line)?;
-        let executable = message["executable"].as_str().filter(|_| {
-            message["reason"] == "compiler-artifact" && message["target"]["name"] == APP_NAME
-        });
-        if let Some(executable) = executable {
-            return Ok(Some(PathBuf::from(executable)));
+        match message["reason"].as_str() {
+            Some("compiler-message") => {
+                if let Some(rendered) = message["message"]["rendered"].as_str() {
+                    print_diagnostic(rendered);
+                }
+            }
+            Some("compiler-artifact") if message["target"]["name"] == APP_NAME => {
+                executable = message["executable"].as_str().map(PathBuf::from);
+            }
+            _ => {}
         }
     }
-    Err("Cargo built Steelgum but reported no executable".into())
+    if !output.status.success() {
+        return Ok(None);
+    }
+    executable
+        .map(Some)
+        .ok_or_else(|| "Cargo built Steelgum but reported no executable".into())
+}
+
+fn print_diagnostic(rendered: &str) {
+    if cfg!(target_os = "linux")
+        && (rendered.contains("unable to find library -lxkbcommon-x11")
+            || rendered.contains("cannot find -lxkbcommon-x11"))
+    {
+        eprintln!(
+            "Steelgum could not link libxkbcommon-x11. Install the XKB X11 development package.\n\
+             On Linux Mint, Ubuntu, or Debian: sudo apt install libxkbcommon-x11-dev"
+        );
+    } else {
+        eprint!("{rendered}");
+    }
 }
 
 #[derive(Default)]

@@ -74,6 +74,11 @@ formatting, Clippy and test checks. CI checks Windows and Linux. Use
 is useful when developing the simulation or when graphics dependencies are
 unavailable. Report any checks the environment prevented you from running.
 
+For desktop changes, run `cargo dev --build-only` with the normal toolchain
+and system library paths before committing. The full verification script runs
+this check too. Cargo check, Clippy, and builds that need a local linker
+workaround cannot verify the normal desktop build.
+
 Use deterministic simulation tests for game rules and failure cases. For
 changes to input, rendering or capture, also run the native application on a
 graphics-capable machine. A successful compilation or headless simulation

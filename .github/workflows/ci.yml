@@ -43,9 +43,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwayland-dev libxkbcommon-dev pkg-config
+          sudo apt-get install -y --no-install-recommends pkg-config libxcb1-dev libfreetype-dev libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev
 
-      - name: Verify headless game and Bevy runner
+      - name: Verify desktop build, headless game, and Bevy runner
         run: python scripts/verify.py
 
       - name: Check Linux installer and update worker

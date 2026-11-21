@@ -23,7 +23,7 @@ def workspace_checks(manifest, lock_flags):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--headless-only", action="store_true", help="Skip the Bevy runner.")
+    parser.add_argument("--headless-only", action="store_true", help="Skip the desktop and Bevy builds.")
     parser.add_argument("--offline", action="store_true", help="Use cached Cargo dependencies.")
     args = parser.parse_args()
 
@@ -37,6 +37,7 @@ def main():
         ["cargo", "run", "--locked", "-p", "door-game", "--", "--demo"],
     ]
     if not args.headless_only:
+        checks.insert(1, ["cargo", "dev", "--build-only"])
         checks.extend(workspace_checks(RENDERER, []))
 
     for command in checks:

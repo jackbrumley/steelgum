@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <dlfcn.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -19,7 +20,6 @@
 namespace {
 constexpr uint32_t width = 256;
 constexpr uint32_t height = 160;
-constexpr int64_t frame_bytes = width * height * 4;
 
 class Library {
 public:
@@ -101,11 +101,24 @@ public:
         initialized = true;
     }
 
-    void call(const char *method, Value &result) {
+    void from_string(const std::string &text) {
+        alignas(String) std::array<std::byte, sizeof(String)> string;
+        api<GDExtensionInterfaceStringNewWithUtf8CharsAndLen>("string_new_with_utf8_chars_and_len")(
+            string.data(), text.data(), static_cast<GDExtensionInt>(text.size()));
+        api<GDExtensionInterfaceGetVariantFromTypeConstructor>("get_variant_from_type_constructor")(
+            GDEXTENSION_VARIANT_TYPE_STRING)(storage.data(), string.data());
+        api<GDExtensionInterfaceVariantGetPtrDestructor>("variant_get_ptr_destructor")(
+            GDEXTENSION_VARIANT_TYPE_STRING)(string.data());
+        initialized = true;
+    }
+
+    void call(const char *method, Value &result, const Value *argument = nullptr) {
         Name name(method);
         GDExtensionCallError error{};
+        const GDExtensionConstVariantPtr raw = argument ? argument->storage.data() : nullptr;
         api<GDExtensionInterfaceVariantCall>("variant_call")(
-            storage.data(), name.pointer(), nullptr, 0, result.storage.data(), &error);
+            storage.data(), name.pointer(), argument ? &raw : nullptr, argument ? 1 : 0,
+            result.storage.data(), &error);
         result.initialized = true;
         if (error.error != GDEXTENSION_CALL_OK) {
             throw std::runtime_error(std::string("Godot call failed: ") + method
@@ -126,11 +139,11 @@ public:
         return result;
     }
 
-    const uint8_t *frame_pixels() {
+    const uint8_t *frame_pixels(int64_t expected_bytes) {
         require(GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY);
         Value length;
         call("size", length);
-        if (length.scalar<int64_t>(GDEXTENSION_VARIANT_TYPE_INT) != frame_bytes) {
+        if (length.scalar<int64_t>(GDEXTENSION_VARIANT_TYPE_INT) != expected_bytes) {
             throw std::runtime_error("Godot returned an unexpected RGBA frame size");
         }
         auto array = api<GDExtensionInterfaceVariantGetPtrInternalGetter>(
@@ -163,7 +176,45 @@ void write_u32(FILE *output, uint32_t value) {
     write_bytes(output, bytes.data(), bytes.size());
 }
 
-void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
+struct Request {
+    uint32_t width;
+    uint32_t height;
+    std::string json;
+};
+
+std::optional<Request> read_request() {
+    auto read_u32 = [](bool allow_eof = false) -> std::optional<uint32_t> {
+        std::array<uint8_t, 4> bytes;
+        const auto count = std::fread(bytes.data(), 1, bytes.size(), stdin);
+        if (count == 0 && allow_eof && std::feof(stdin)) {
+            return std::nullopt;
+        }
+        if (count != bytes.size()) {
+            throw std::runtime_error("Incomplete render request");
+        }
+        return uint32_t(bytes[0]) | (uint32_t(bytes[1]) << 8)
+            | (uint32_t(bytes[2]) << 16) | (uint32_t(bytes[3]) << 24);
+    };
+    const auto bytes = read_u32(true);
+    if (!bytes) {
+        return std::nullopt;
+    }
+    const auto frame_width = *read_u32();
+    const auto frame_height = *read_u32();
+    if (*bytes == 0 || *bytes > 8 * 1024 * 1024
+            || frame_width < 2 || frame_height < 2 || frame_width > 2048 || frame_height > 2048) {
+        throw std::runtime_error("Unsupported render request size");
+    }
+    std::string json(*bytes, '\0');
+    if (std::fread(json.data(), 1, *bytes, stdin) != *bytes) {
+        throw std::runtime_error("Incomplete render request JSON");
+    }
+    return Request{frame_width, frame_height, std::move(json)};
+}
+
+enum class Mode { Probe, AbiOnly, Worker, WorkerCheck };
+
+void run_probe(GDExtensionObjectPtr instance, FILE *output, Mode mode) {
     Value host;
     host.from_object(instance);
     Value started;
@@ -190,7 +241,7 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
         }
     };
 
-    if (abi_only) {
+    if (mode == Mode::AbiOnly) {
         Value request;
         tree.call("request_frame", request);
         iterate();
@@ -203,10 +254,38 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
         return;
     }
 
-    write_bytes(output, "SGRGBA01", 8);
-    for (uint32_t index = 0; index < 2; ++index) {
-        Value request;
-        tree.call("request_frame", request);
+    const bool worker = mode == Mode::Worker || mode == Mode::WorkerCheck;
+    if (mode != Mode::WorkerCheck) {
+        write_bytes(output, "SGRGBA01", 8);
+        std::fflush(output);
+    }
+    for (uint32_t index = 0; worker || index < 2; ++index) {
+        uint32_t frame_width = width;
+        uint32_t frame_height = height;
+        if (worker) {
+            const auto request = read_request();
+            if (!request) {
+                return;
+            }
+            frame_width = request->width;
+            frame_height = request->height;
+            Value json;
+            json.from_string(request->json);
+            Value accepted;
+            tree.call("apply_snapshot", accepted, &json);
+            if (!accepted.scalar<GDExtensionBool>(GDEXTENSION_VARIANT_TYPE_BOOL)) {
+                throw std::runtime_error("Godot rejected the Steelgum scene snapshot");
+            }
+            if (mode == Mode::WorkerCheck) {
+                iterate();
+                std::fputs("LibGodot accepted the Steelgum renderer snapshot.\n", stderr);
+                return;
+            }
+        } else {
+            Value request;
+            tree.call("request_frame", request);
+        }
+        const auto frame_bytes = int64_t(frame_width) * frame_height * 4;
         // SceneTree flushes queued transforms and updates worlds during
         // iteration. Drawing before that can read back the previous camera.
         iterate();
@@ -217,10 +296,10 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
             Value frame;
             tree.call("take_frame", frame);
             if (frame.type() != GDEXTENSION_VARIANT_TYPE_NIL) {
-                const auto *bytes = frame.frame_pixels();
+                const auto *bytes = frame.frame_pixels(frame_bytes);
                 write_u32(output, index);
-                write_u32(output, width);
-                write_u32(output, height);
+                write_u32(output, frame_width);
+                write_u32(output, frame_height);
                 write_bytes(output, bytes, frame_bytes);
                 if (std::fflush(output) != 0) {
                     throw std::runtime_error("Could not flush RGBA frame stream");
@@ -239,7 +318,7 @@ void run_probe(GDExtensionObjectPtr instance, FILE *output, bool abi_only) {
 
 int main(int argc, char *argv[]) {
     if (argc < 3) {
-        std::fprintf(stderr, "Usage: %s LIBGODOT PROJECT_DIR [--abi-only | GODOT_FLAGS...]\n", argv[0]);
+        std::fprintf(stderr, "Usage: %s LIBGODOT PROJECT_DIR [--abi-only | --worker | --worker-check] [GODOT_FLAGS...]\n", argv[0]);
         return EXIT_FAILURE;
     }
     try {
@@ -259,16 +338,23 @@ int main(int argc, char *argv[]) {
             "libgodot_create_godot_instance");
         auto destroy = library.symbol<decltype(&libgodot_destroy_godot_instance)>(
             "libgodot_destroy_godot_instance");
+        Mode mode = Mode::Probe;
+        if (argc > 3) {
+            const std::string flag(argv[3]);
+            if (flag == "--abi-only") mode = Mode::AbiOnly;
+            if (flag == "--worker") mode = Mode::Worker;
+            if (flag == "--worker-check") mode = Mode::WorkerCheck;
+        }
+        const bool worker = mode == Mode::Worker || mode == Mode::WorkerCheck;
         std::array options = {argv[0], const_cast<char *>("--path"), argv[2],
-            const_cast<char *>("--script"), const_cast<char *>("res://probe.gd"),
+            const_cast<char *>("--script"),
+            const_cast<char *>(worker ? "res://renderer.gd" : "res://probe.gd"),
             const_cast<char *>("--audio-driver"), const_cast<char *>("Dummy")};
         std::vector<char *> arguments(options.begin(), options.end());
-        const bool abi_only = argc == 4 && std::string(argv[3]) == "--abi-only";
-        if (abi_only) {
+        if (mode == Mode::AbiOnly || mode == Mode::WorkerCheck) {
             arguments.push_back(const_cast<char *>("--headless"));
-        } else {
-            arguments.insert(arguments.end(), argv + 3, argv + argc);
         }
+        arguments.insert(arguments.end(), argv + (mode == Mode::Probe ? 3 : 4), argv + argc);
         auto *instance = create(static_cast<int>(arguments.size()), arguments.data(), initialize);
         if (!instance) {
             throw std::runtime_error("Could not create a LibGodot instance");
@@ -279,7 +365,7 @@ int main(int argc, char *argv[]) {
         if (version.major != 4 || version.minor != 6) {
             throw std::runtime_error("This probe was written for the Godot 4.6 ABI");
         }
-        run_probe(instance, output.get(), abi_only);
+        run_probe(instance, output.get(), mode);
         return EXIT_SUCCESS;
     } catch (const std::exception &failure) {
         std::fprintf(stderr, "LibGodot probe: %s\n", failure.what());

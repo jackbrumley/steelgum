@@ -54,3 +54,21 @@ STEELGUM_LIBGODOT_HOST="$build_dir/host" \
 STEELGUM_LIBGODOT="$godot_source/bin/libgodot.linuxbsd.template_release.x86_64.so" \
   cargo test paints_two_live_libgodot_frames_in_gpui -- --ignored --test-threads=1
 ```
+
+## Live worker
+
+Run the same host with `--worker` after the project path for the desktop
+adapter. It keeps one Godot instance open and reads requests from stdin.
+A request has three little-endian u32 fields (JSON size in bytes, width,
+height) followed by UTF-8 scene JSON. Frame numbers start at zero and each
+response reuses the probe's RGBA stream layout. The worker redraws on
+request and has no continuous frame loop. Close stdin to shut it down.
+`--worker-check` accepts a single request in headless mode, which can check
+scene loading without a graphical session.
+
+On Linux, set `STEELGUM_LIBGODOT_HOST` and `STEELGUM_LIBGODOT` before starting
+Steelgum to make **Godot 4.6 (experimental)** available under **Settings →
+Viewport → Preview renderer** in a viewport build that includes the adapter.
+The worker uses a native graphics context window minimized by Godot.
+The scene image and editor navigation are inside Steelgum. This preview
+uses CPU frame transfer and currently draws scene boxes and lighting.

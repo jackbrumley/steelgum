@@ -16,7 +16,7 @@ if script=$(mktemp -t steelgum-update.XXXXXXXX) &&
     curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
       --connect-timeout 10 --max-time 60 --output "$script" "$STEELGUM_UPDATE_SITE/install.sh" &&
     [[ -s "$script" ]] &&
-    bash "$script" --appimage --version "$STEELGUM_UPDATE_TAG" --yes --relaunch; then
+    bash "$script" "${STEELGUM_UPDATE_MODE:---appimage}" --version "$STEELGUM_UPDATE_TAG" --yes --relaunch; then
     rm -f -- "$script"
     exit 0
 fi

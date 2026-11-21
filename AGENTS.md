@@ -60,11 +60,11 @@ implementation details do not apply.
 
 ## Release variations
 
-Steelgum ships a per-user x64 Linux AppImage and a per-user x64 Windows
-installer. The native window uses a standard OS frame and exposes Updates with
-F6 while there is no Settings window. Keep the development preview and
-installed application separate. The packaged updater and fresh installation
-share the same installers. See [Release and updates](docs/release.md).
+Steelgum packages Linux x64 as `.deb`, `.rpm` and AppImage, and Windows x64
+with a per-user installer. The native window uses a standard OS frame and
+exposes Updates with F6 while there is no Settings window. Keep the development
+preview and installed application separate. The packaged updater and fresh
+installation share the same installers. See [Release and updates](docs/release.md).
 
 ## Verification
 

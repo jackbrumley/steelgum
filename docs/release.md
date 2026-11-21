@@ -53,18 +53,40 @@ source repositories choose their Steelgum dependency with Cargo and retain
 their own release process. Updating the desktop tooling must not rewrite a
 game's declared dependency or its authored project files.
 
+## Linux packages
+
+Build the x64 `.deb`, `.rpm` and AppImage from one staged desktop binary,
+launcher and icon on Ubuntu 22.04. `scripts/release-assets.mjs` selects the
+Cargo manifest for both the Linux and Windows builds. The selected binary
+must be named `steelgum` and report `steelgum X.Y.Z` with `--version`. When the
+desktop target changes, verify its linked and runtime-loaded libraries on the
+supported distributions and run the installed application on Wayland and X11.
+
+The default Linux installer uses `.deb` on Mint, Ubuntu and supported Debian
+versions or `.rpm` on Fedora. `--system` requires a native package and
+administrator authentication. `--appimage` installs without administrator
+access. Older releases with only an AppImage still work with the default
+installer. A successful system install removes the current user's AppImage
+launcher, icon and executable so they cannot shadow the system package.
+
+F6 updates use the same format as the installed application. For system
+packages, the update downloads the verified GitHub Release asset and gives it
+to the package manager. The uninstall script supports both formats and keeps
+settings, projects and logs. Use `--appimage` or `--system` to remove just that
+format when both are present.
+
 ## Before the first public release
 
-- Choose the open-source licence and verify the redistribution terms for
-  packaged dependencies and any shipped assets.
+- Choose the open-source licence, update the RPM `License` field, and verify
+  the redistribution terms for packaged dependencies and shipped assets.
 - Establish `dev`, `main` and the canonical release repository. The code
   currently uses the checkout's `jackbrumley/steelgum` remote. If the project
   moves to the organisation, update the release workflow, installers,
   updater and site together before tagging.
-- The initial package set is an x64 Linux AppImage and an x64 Windows per-user
-  installer. Use plain `X.Y.Z` versions and `vX.Y.Z` tags. GitHub CI builds and
-  verifies both assets and checks the installed version from a tagged
-  prerelease. Promote only after those jobs and the release notes pass.
+- Use plain `X.Y.Z` versions and `vX.Y.Z` tags. GitHub CI builds and verifies
+  all four assets from a tagged prerelease. Linux jobs exercise AppImage
+  installs, migration to `.deb` and `.rpm`, native reinstalls and removal.
+  Promote only after those jobs and the release notes pass.
 - Run the graphical release candidate on Linux and Windows and verify the F6
   dialogs, background check, restart, and Open Update Log. The general desktop
   session log, crash reporting and diagnostics UI remain first-release work.

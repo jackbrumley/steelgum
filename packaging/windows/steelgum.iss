@@ -10,6 +10,10 @@
   #error SteelgumIcon is required
 #endif
 
+#ifndef SteelgumBinary
+  #error SteelgumBinary is required
+#endif
+
 [Setup]
 AppId={{CA30D8B3-ACB0-4951-B503-2F91D6DD3BD4}
 AppName=Steelgum
@@ -34,7 +38,7 @@ Compression=lzma2
 SolidCompression=yes
 
 [Files]
-Source: "..\..\apps\door-game-bevy\target\release\steelgum.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SteelgumBinary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SteelgumIcon}"; DestDir: "{app}"
 
 [Icons]

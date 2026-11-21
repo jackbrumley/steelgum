@@ -6,13 +6,16 @@ try {
     $version = node scripts/release-assets.mjs version
     $asset = node scripts/release-assets.mjs asset windows
     $outputBase = [IO.Path]::GetFileNameWithoutExtension($asset)
+    $manifest = node scripts/release-assets.mjs desktop-manifest
+    $target = Join-Path (Split-Path $manifest) 'target'
     $lockArgs = @()
-    if (Test-Path 'apps/door-game-bevy/Cargo.lock') {
+    if (Test-Path (Join-Path (Split-Path $manifest) 'Cargo.lock')) {
         $lockArgs = @('--locked')
     }
-    cargo build --release --manifest-path apps/door-game-bevy/Cargo.toml --bin steelgum @lockArgs
+    cargo build --release --manifest-path $manifest --target-dir $target --bin steelgum @lockArgs
 
-    $actual = & './apps/door-game-bevy/target/release/steelgum.exe' --version
+    $binary = (Resolve-Path (Join-Path $target 'release/steelgum.exe')).Path
+    $actual = & $binary --version
     if ($actual -cne "steelgum $version") {
         throw "Expected steelgum $version, got $actual."
     }
@@ -26,7 +29,7 @@ try {
     try {
         $icon = Join-Path $workDirectory 'steelgum.ico'
         magick -background none docs/assets/steelgum.svg -define icon:auto-resize=128,64,48,32,16 $icon
-        & $compiler "/DSteelgumVersion=$version" "/DOutputBase=$outputBase" "/DSteelgumIcon=$icon" packaging/windows/steelgum.iss
+        & $compiler "/DSteelgumVersion=$version" "/DOutputBase=$outputBase" "/DSteelgumIcon=$icon" "/DSteelgumBinary=$binary" packaging/windows/steelgum.iss
         if (-not (Test-Path "release-artifacts/$asset" -PathType Leaf)) {
             throw "Setup did not create $asset."
         }

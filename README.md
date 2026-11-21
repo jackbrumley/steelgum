@@ -58,6 +58,10 @@ Press F6 in the Bevy window to check for updates. Packaged installations also
 check in the background at startup and can update themselves. Source builds
 can read release information and stay under Cargo’s control.
 
+The [Steelgum install page](https://brumley.info/steelgum/) offers native x64
+Linux packages through `apt` or `dnf` on supported releases and a user-local
+AppImage. To switch from the AppImage, run the System Install command again.
+
 Run `python3 scripts/verify.py` for local verification, or add
 `--headless-only --offline` to use cached dependencies without the
 Bevy runner. See

@@ -107,11 +107,23 @@
   <script type="application/json" id="install-config">
   {
     "linux": {
-      "appimage": {
-        "label": "AppImage",
+      "system": {
+        "label": "System Install",
         "command": "curl --proto '=https' --tlsv1.2 -sSf https://brumley.info/steelgum/install.sh | bash",
         "hint": "Open <strong>Terminal</strong> and run:",
+        "note": "Installs the x64 system package on Debian, Ubuntu, Mint or Fedora. Uses the AppImage when a system install is unavailable."
+      },
+      "appimage": {
+        "label": "AppImage",
+        "command": "curl --proto '=https' --tlsv1.2 -sSf https://brumley.info/steelgum/install.sh | bash -s -- --appimage",
+        "hint": "Open <strong>Terminal</strong> and run:",
         "note": "Installs Steelgum for your user on x64 Linux."
+      },
+      "uninstall": {
+        "label": "Uninstall",
+        "command": "curl --proto '=https' --tlsv1.2 -sSf https://brumley.info/steelgum/uninstall.sh | bash",
+        "hint": "Open <strong>Terminal</strong> and run:",
+        "note": "Removes Steelgum and keeps your settings and projects."
       }
     },
     "windows": {
@@ -139,6 +151,12 @@
           /^sha256:[\da-f]{64}$/i.test(asset.digest));
         if (version && !release.draft && !release.prerelease &&
             hasVerifiedAsset('linux-x64.AppImage') && hasVerifiedAsset('windows-x64-setup.exe')) {
+          if (!hasVerifiedAsset('linux-x64.deb') || !hasVerifiedAsset('linux-x64.rpm')) {
+            const config = document.getElementById('install-config');
+            const options = JSON.parse(config.textContent);
+            delete options.linux.system;
+            config.textContent = JSON.stringify(options);
+          }
           const widget = document.createElement('script');
           widget.src = 'https://brumley.info/shared/v1/install-widget.js';
           const install = document.getElementById('release-install');

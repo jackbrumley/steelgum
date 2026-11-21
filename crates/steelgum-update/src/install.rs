@@ -10,43 +10,89 @@ use crate::{INSTALL_SITE, UpdateError, VersionLabel, open_log, update_log_path};
 #[derive(Debug)]
 pub struct Installation {
     executable: PathBuf,
+    #[cfg(target_os = "linux")]
+    mode: LinuxInstallMode,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, PartialEq, Eq)]
+enum LinuxInstallMode {
+    AppImage,
+    System,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxInstallMode {
+    fn installer_flag(&self) -> &'static str {
+        match self {
+            Self::AppImage => "--appimage",
+            Self::System => "--system",
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_system_package(executable: &Path) -> bool {
+    if executable != Path::new("/usr/bin/steelgum") {
+        return false;
+    }
+    let owned_by = |program, args: &[&str], matches: fn(&str) -> bool| {
+        Command::new(program)
+            .args(args)
+            .output()
+            .is_ok_and(|result| {
+                result.status.success() && matches(String::from_utf8_lossy(&result.stdout).trim())
+            })
+    };
+    owned_by("dpkg-query", &["-S", "/usr/bin/steelgum"], |owner| {
+        owner == "steelgum: /usr/bin/steelgum" || owner == "steelgum:amd64: /usr/bin/steelgum"
+    }) || owned_by(
+        "rpm",
+        &["-qf", "--qf", "%{NAME}\n", "/usr/bin/steelgum"],
+        |owner| owner == "steelgum",
+    )
 }
 
 pub fn installed_app() -> Result<Option<Installation>, UpdateError> {
     let running = env::current_exe()
         .map_err(|error| UpdateError::io("could not find running executable", error))?;
     #[cfg(target_os = "linux")]
-    let (running, installed) = (
-        env::var_os("APPIMAGE")
+    {
+        let appimage = env::var_os("APPIMAGE")
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .unwrap_or(running),
-        crate::home_path()?.join(".local/bin/steelgum"),
-    );
-    #[cfg(windows)]
-    let installed = env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .filter(|path| path.is_absolute())
-        .ok_or(UpdateError::MissingPath("LOCALAPPDATA"))?
-        .join("Programs")
-        .join("Steelgum")
-        .join("steelgum.exe");
+            .map(PathBuf::from);
+        if appimage.is_none() && is_system_package(&running) {
+            return Ok(Some(Installation {
+                executable: running,
+                mode: LinuxInstallMode::System,
+            }));
+        }
+        let executable = appimage.unwrap_or(running);
+        let installed = crate::home_path()?.join(".local/bin/steelgum");
+        Ok((executable == installed).then_some(Installation {
+            executable,
+            mode: LinuxInstallMode::AppImage,
+        }))
+    }
     #[cfg(not(any(target_os = "linux", windows)))]
     {
         let _ = running;
-        return Ok(None);
+        Ok(None)
     }
 
-    #[cfg(any(target_os = "linux", windows))]
+    #[cfg(windows)]
     {
+        let installed = env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|path| path.is_absolute())
+            .ok_or(UpdateError::MissingPath("LOCALAPPDATA"))?
+            .join("Programs")
+            .join("Steelgum")
+            .join("steelgum.exe");
         // Windows install directories can be returned with different ASCII casing.
-        let matched = if cfg!(windows) {
-            running
-                .as_os_str()
-                .eq_ignore_ascii_case(installed.as_os_str())
-        } else {
-            running == installed
-        };
+        let matched = running
+            .as_os_str()
+            .eq_ignore_ascii_case(installed.as_os_str());
         Ok(matched.then_some(Installation {
             executable: running,
         }))
@@ -66,6 +112,8 @@ pub fn begin_install(
         .map_err(|source| UpdateError::io("could not create update handshake directory", source))?;
     let ready = handshake.path().join("ready");
     let mut command = worker_command()?;
+    #[cfg(target_os = "linux")]
+    command.env("STEELGUM_UPDATE_MODE", installation.mode.installer_flag());
     command
         .env("STEELGUM_UPDATE_PARENT", std::process::id().to_string())
         .env("STEELGUM_UPDATE_READY", &ready)
@@ -175,6 +223,52 @@ mod tests {
         assert!(windows.contains("WaitForExit"));
         assert!(windows.contains("--update-failed"));
         assert!(windows.contains("$LASTEXITCODE"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_worker_preserves_the_installed_format() {
+        use super::LinuxInstallMode;
+        use std::{fs, os::unix::fs::PermissionsExt, process::Command};
+
+        let folder = tempfile::tempdir().expect("fixture directory");
+        let curl = folder.path().join("curl");
+        let ready = folder.path().join("ready");
+        fs::write(
+            &curl,
+            r#"#!/bin/bash
+while [[ $1 != --output ]]; do shift; done
+printf 'printf "%%s\\n" "$@"\n' > "$2"
+"#,
+        )
+        .expect("mock downloader");
+        fs::set_permissions(&curl, fs::Permissions::from_mode(0o755)).expect("executable fixture");
+        let path = std::env::join_paths(std::iter::once(folder.path().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").expect("system PATH")),
+        ))
+        .expect("fixture PATH");
+        let mut parent = Command::new("true").spawn().expect("mock parent");
+        let parent_id = parent.id();
+        assert!(parent.wait().expect("mock parent has exited").success());
+        for (mode, flag) in [
+            (LinuxInstallMode::AppImage, "--appimage"),
+            (LinuxInstallMode::System, "--system"),
+        ] {
+            let result = Command::new("bash")
+                .args(["-c", include_str!("update-linux.sh")])
+                .env("PATH", &path)
+                .env("STEELGUM_UPDATE_MODE", mode.installer_flag())
+                .env("STEELGUM_UPDATE_PARENT", parent_id.to_string())
+                .env("STEELGUM_UPDATE_READY", &ready)
+                .env("STEELGUM_UPDATE_SITE", "https://example.invalid")
+                .env("STEELGUM_UPDATE_TAG", "v1.2.3")
+                .output()
+                .expect("worker exits");
+            assert!(result.status.success(), "{result:?}");
+            assert!(ready.is_file());
+            let output = String::from_utf8(result.stdout).expect("installer arguments");
+            assert!(output.ends_with(&format!("{flag}\n--version\nv1.2.3\n--yes\n--relaunch\n")));
+        }
     }
 
     #[cfg(target_os = "linux")]

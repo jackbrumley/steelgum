@@ -2,13 +2,12 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-import { DOWNLOAD_LINKS, EXPECTED_ASSETS, INSTALL_SITE, REPOSITORY, TAG, VERSION, verifyPrerelease } from './release-assets.mjs';
+import { DESKTOP_MANIFEST, EXPECTED_ASSETS, INSTALL_SITE, REPOSITORY, TAG, VERSION, releaseDownloads, verifyPrerelease } from './release-assets.mjs';
 
 const ROOT = new URL('../', import.meta.url);
 const DEV = 'dev';
 const WORKFLOW = '.github/workflows/release.yml';
-const NATIVE = 'apps/door-game-bevy/Cargo.toml';
-const FILES = ['Cargo.toml', NATIVE, 'Cargo.lock', 'apps/door-game-bevy/Cargo.lock'];
+const FILES = ['Cargo.toml', DESKTOP_MANIFEST, 'Cargo.lock', DESKTOP_MANIFEST.replace(/\.toml$/, '.lock')];
 const PLAIN_VERSION = /^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$/;
 const CARGO_VERSION = /^(version = ")[^"]+(")$/gm;
 
@@ -139,13 +138,7 @@ export function assertNotes(release) {
   if (release.name !== TAG || !body.startsWith(`# Steelgum ${TAG}\n\n`) || /\bTODO\b/i.test(body)) {
     throw new Error(`Finish the release notes for ${TAG} before promotion.`);
   }
-  const downloads = [
-    '### Downloads',
-    '',
-    `- [Linux x64 AppImage](${DOWNLOAD_LINKS.linux})`,
-    `- [Windows x64 user installer](${DOWNLOAD_LINKS.windows})`,
-  ].join('\n');
-  if (!body.endsWith(downloads)) throw new Error('Keep the generated Downloads block at the end of the release notes.');
+  if (!body.endsWith(releaseDownloads())) throw new Error('Keep the generated Downloads block at the end of the release notes.');
 }
 
 export function assertWorkflow(runs, sha) {
@@ -163,9 +156,9 @@ export function assertWorkflow(runs, sha) {
 }
 
 export async function assertInstallerDeployment(sha, readSource, fetcher = fetch) {
-  const scripts = ['install.sh', 'install.ps1'];
-  await Promise.all(scripts.map(async (name) => {
-    const url = new URL(name, INSTALL_SITE);
+  const files = ['install.sh', 'uninstall.sh', 'install.ps1', 'index.html'];
+  await Promise.all(files.map(async (name) => {
+    const url = new URL(name === 'index.html' ? './' : name, INSTALL_SITE);
     url.searchParams.set('release', sha);
     url.searchParams.set('check', String(Date.now()));
     const expected = readSource(`docs/${name}`).replaceAll('\r\n', '\n');

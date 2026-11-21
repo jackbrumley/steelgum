@@ -26,7 +26,6 @@ jobs:
     outputs:
       tag: ${{ steps.metadata.outputs.tag }}
       version: ${{ steps.metadata.outputs.version }}
-      linux: ${{ steps.metadata.outputs.linux }}
       windows: ${{ steps.metadata.outputs.windows }}
     steps:
       - uses: actions/checkout@v7
@@ -55,7 +54,6 @@ jobs:
           {
             printf 'tag=%s\n' "$tag"
             printf 'version=%s\n' "$(node scripts/release-assets.mjs version)"
-            printf 'linux=%s\n' "$(node scripts/release-assets.mjs asset linux)"
             printf 'windows=%s\n' "$(node scripts/release-assets.mjs asset windows)"
           } >> "$GITHUB_OUTPUT"
       - name: Ensure a public prerelease exists for testing
@@ -86,7 +84,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends build-essential ca-certificates curl \
-            desktop-file-utils file git libwayland-dev libxkbcommon-dev pkg-config
+            desktop-file-utils file git libwayland-dev libxkbcommon-dev pkg-config rpm
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -100,13 +98,16 @@ jobs:
           curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs |
             sh -s -- -y --profile minimal --default-toolchain "$RUSTUP_TOOLCHAIN"
           printf '%s/.cargo/bin\n' "$HOME" >> "$GITHUB_PATH"
-      - name: Build and smoke-test AppImage
+      - name: Build and smoke-test Linux packages
         shell: bash
-        run: bash packaging/linux/build-appimage.sh
+        run: bash packaging/linux/build-packages.sh
       - uses: actions/upload-artifact@v7
         with:
           name: steelgum-linux
-          path: release-artifacts/${{ needs.prepare.outputs.linux }}
+          path: |
+            release-artifacts/*.deb
+            release-artifacts/*.rpm
+            release-artifacts/*.AppImage
           if-no-files-found: error
 
   windows:
@@ -153,15 +154,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          LINUX_ASSET: ${{ needs.prepare.outputs.linux }}
-          WINDOWS_ASSET: ${{ needs.prepare.outputs.windows }}
         run: |
           state=$(gh release view "$TAG" --json isPrerelease,isDraft --jq '[.isPrerelease,.isDraft] | @tsv')
           if [[ "$state" != $'true\tfalse' ]]; then
             printf '::error::Release %s is no longer a prerelease.\n' "$TAG"
             exit 1
           fi
-          gh release upload "$TAG" "release-artifacts/$LINUX_ASSET" "release-artifacts/$WINDOWS_ASSET" --clobber
+          names=$(node scripts/release-assets.mjs assets)
+          mapfile -t assets <<< "$names"
+          gh release upload "$TAG" "${assets[@]/#/release-artifacts/}" --clobber
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" > "$RUNNER_TEMP/release.json"
           node scripts/release-assets.mjs verify "$RUNNER_TEMP/release.json"
 
@@ -180,21 +181,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Install and reinstall Linux AppImage
+      - name: Verify AppImage and apt install, migration and removal
         if: runner.os == 'Linux'
         shell: bash
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: |
-          export HOME="$RUNNER_TEMP/Steelgum Test Home"
-          mkdir -p "$HOME"
-          bash docs/install.sh --version "$TAG" --appimage --yes --no-relaunch
-          bash docs/install.sh --version "$TAG" --appimage --yes --no-relaunch
-          actual=$("$HOME/.local/bin/steelgum" --version)
-          if [[ "$actual" != "steelgum $VERSION" ]]; then
-            printf '::error::Expected steelgum %s, got %s.\n' "$VERSION" "$actual"
-            exit 1
-          fi
+        run: bash scripts/test-linux-release.sh deb
       - name: Install and reinstall Windows user package
         if: runner.os == 'Windows'
         shell: pwsh
@@ -208,3 +200,22 @@ jobs:
           if ($actual -cne "steelgum $env:VERSION") {
             throw "Expected steelgum $env:VERSION, got $actual."
           }
+
+  install-fedora:
+    needs: [prepare, verify]
+    runs-on: ubuntu-24.04
+    container: fedora:44
+    env:
+      STEELGUM_GITHUB_TOKEN: ${{ github.token }}
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - name: Install verification tools
+        run: dnf -y install git python3 procps-ng libwayland-client /usr/bin/curl /usr/bin/flock
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Verify AppImage and dnf install, migration and removal
+        shell: bash
+        run: bash scripts/test-linux-release.sh rpm

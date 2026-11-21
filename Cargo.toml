@@ -1,6 +1,11 @@
 [workspace]
 resolver = "3"
-members = ["crates/steelgum", "examples/door-game", "crates/steelgum-update"]
+members = [
+    "crates/steelgum",
+    "crates/steelgum-update",
+    "examples/door-game",
+    "tools/steelgum-dev",
+]
 exclude = ["apps/door-game-bevy"]
 
 [workspace.package]

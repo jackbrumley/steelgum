@@ -13,15 +13,21 @@ cargo run --locked
 For automatic rebuilds, run this from the Steelgum repository root:
 
 ```sh
-python3 scripts/dev.py
+cargo dev
 ```
 
 It watches the desktop source, Steelgum core, and bundled demo scene. A
 successful build restarts the window. A compile error leaves the previous
 window open, with diagnostics in the terminal. Press **Ctrl+C** to stop.
 To reopen the same project after each restart, pass the worktree and scene
-path to the watcher, such as `python3 scripts/dev.py /path/to/worktree
-scenes/room.json`.
+path to the watcher:
+
+```sh
+cargo dev /path/to/worktree scenes/room.json
+```
+
+Both commands use Cargo and the Rust toolchain. The installed Steelgum
+application runs directly.
 
 The directory pins Rust 1.99.1. On Debian-based Linux systems, the build uses
 `pkg-config`, `libxcb1-dev`, `libfreetype-dev`, `libfontconfig1-dev`,
